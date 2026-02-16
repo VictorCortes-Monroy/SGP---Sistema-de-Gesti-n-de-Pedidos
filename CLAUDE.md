@@ -97,3 +97,5 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 
 ## API Prefix
 Todos los endpoints bajo `/api/v1/`
+
+Cualquier avance ve documentandolo en progreso.md, el objetivo es ir armando un paso a paso.

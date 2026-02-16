@@ -41,7 +41,7 @@ class TestUsersCRUD:
         admin = seed_data["users"]["admin"]
         resp = await client.get(f"{API}/users/", headers=auth_header(admin.id))
         assert resp.status_code == 200
-        assert len(resp.json()) == 4
+        assert len(resp.json()["items"]) == 4
 
     async def test_get_user_by_id(self, client, seed_data):
         admin = seed_data["users"]["admin"]
@@ -102,5 +102,5 @@ class TestUsersCRUD:
         assert resp.status_code == 204
         # Should not appear in list
         resp = await client.get(f"{API}/users/", headers=auth_header(admin.id))
-        emails = [u["email"] for u in resp.json()]
+        emails = [u["email"] for u in resp.json()["items"]]
         assert "fin@test.com" not in emails

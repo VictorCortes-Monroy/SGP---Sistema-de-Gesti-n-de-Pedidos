@@ -1,8 +1,9 @@
 from typing import Any, List, Optional
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest
+from datetime import datetime, date
+from fastapi import APIRouter, Depends, HTTPException, Query, Request as FastAPIRequest
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
@@ -10,6 +11,7 @@ from app.api.deps import get_client_ip
 from app.models.users import User
 from app.models.request import Request, RequestItem, RequestStatus
 from app.models.workflow import WorkflowLog
+from app.models.comment import Comment
 from app.schemas.request import (
     RequestCreate,
     Request as RequestSchema,
@@ -21,6 +23,8 @@ from app.schemas.workflow import (
     RequestTimeline,
     ReceptionInput,
 )
+from app.schemas.comment import CommentCreate, CommentResponse
+from app.schemas.pagination import PaginatedResponse
 from app.services.workflow import WorkflowEngine
 from app.services.budget_service import BudgetService
 
@@ -56,6 +60,64 @@ async def _load_request_with_logs(db: AsyncSession, request_id: str) -> Request:
     return request
 
 
+def _build_role_filter(query, current_user: User):
+    """Apply role-based visibility filter to a query."""
+    role_name = current_user.role.name if current_user.role else None
+
+    if role_name == "Admin":
+        pass  # Admin sees all
+    elif role_name == "Technical Approver":
+        query = query.where(
+            or_(
+                Request.requester_id == current_user.id,
+                Request.status == RequestStatus.PENDING_TECHNICAL,
+            )
+        )
+    elif role_name == "Financial Approver":
+        query = query.where(
+            or_(
+                Request.requester_id == current_user.id,
+                Request.status == RequestStatus.PENDING_FINANCIAL,
+            )
+        )
+    else:
+        query = query.where(Request.requester_id == current_user.id)
+
+    return query
+
+
+def _apply_filters(query, *, status, search, created_from, created_to, min_amount, max_amount, cost_center_id):
+    """Apply optional filters to a request query."""
+    if status:
+        try:
+            status_enum = RequestStatus(status)
+            query = query.where(Request.status == status_enum)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                Request.title.ilike(pattern),
+                Request.description.ilike(pattern),
+            )
+        )
+
+    if created_from:
+        query = query.where(Request.created_at >= datetime.combine(created_from, datetime.min.time()))
+    if created_to:
+        query = query.where(Request.created_at <= datetime.combine(created_to, datetime.max.time()))
+    if min_amount is not None:
+        query = query.where(Request.total_amount >= min_amount)
+    if max_amount is not None:
+        query = query.where(Request.total_amount <= max_amount)
+    if cost_center_id:
+        query = query.where(Request.cost_center_id == cost_center_id)
+
+    return query
+
+
 # ─── CREATE ──────────────────────────────────────────────────────────────────
 
 @router.post("/", response_model=RequestSchema)
@@ -63,7 +125,7 @@ async def create_request(
     *,
     db: AsyncSession = Depends(deps.get_db),
     request_in: RequestCreate,
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Create a new request in DRAFT status."""
     total = sum(item.quantity * item.unit_price for item in request_in.items)
@@ -75,7 +137,7 @@ async def create_request(
         cost_center_id=request_in.cost_center_id,
         total_amount=total,
         status=RequestStatus.DRAFT,
-        current_step=0
+        current_step=0,
     )
     db.add(db_request)
     await db.flush()
@@ -87,12 +149,11 @@ async def create_request(
             sku=item.sku,
             quantity=item.quantity,
             unit_price=item.unit_price,
-            total_price=item.quantity * item.unit_price
+            total_price=item.quantity * item.unit_price,
         )
         db.add(db_item)
 
     await db.commit()
-
     return await _load_request(db, str(db_request.id))
 
 
@@ -104,7 +165,7 @@ async def submit_request(
     db: AsyncSession = Depends(deps.get_db),
     request_id: str,
     current_user: User = Depends(deps.get_current_user),
-    http_request: FastAPIRequest
+    http_request: FastAPIRequest,
 ) -> Any:
     """Submit a draft request for approval. Reserves budget and starts workflow."""
     request = await _load_request(db, request_id)
@@ -115,14 +176,12 @@ async def submit_request(
     if request.status != RequestStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Only DRAFT requests can be submitted")
 
-    # Reserve budget
     budget_service = BudgetService(db)
     try:
         await budget_service.reserve_funds(request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Determine approval chain
     wf_engine = WorkflowEngine(db)
     steps = await wf_engine.get_required_approvals(request)
 
@@ -134,7 +193,6 @@ async def submit_request(
     request.status = new_status
     request.current_step = 0
 
-    # Create audit log for submission
     ip_address = get_client_ip(http_request)
     log = WorkflowLog(
         request_id=request.id,
@@ -143,7 +201,7 @@ async def submit_request(
         from_status=RequestStatus.DRAFT.value,
         to_status=new_status.value,
         comment="Request submitted for approval",
-        ip_address=ip_address
+        ip_address=ip_address,
     )
     db.add(log)
 
@@ -160,7 +218,7 @@ async def approve_request(
     request_id: str,
     action_in: WorkflowAction,
     current_user: User = Depends(deps.get_current_user),
-    http_request: FastAPIRequest
+    http_request: FastAPIRequest,
 ) -> Any:
     """Approve a request at the current workflow step."""
     request = await _load_request(db, request_id)
@@ -177,7 +235,7 @@ async def approve_request(
             user=current_user,
             action="APPROVE",
             comment=action_in.comment,
-            ip_address=ip_address
+            ip_address=ip_address,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -196,7 +254,7 @@ async def reject_request(
     request_id: str,
     action_in: WorkflowAction,
     current_user: User = Depends(deps.get_current_user),
-    http_request: FastAPIRequest
+    http_request: FastAPIRequest,
 ) -> Any:
     """Reject a request. Releases reserved budget."""
     request = await _load_request(db, request_id)
@@ -213,71 +271,114 @@ async def reject_request(
             user=current_user,
             action="REJECT",
             comment=action_in.comment,
-            ip_address=ip_address
+            ip_address=ip_address,
         )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
-    # Release reserved budget
     budget_service = BudgetService(db)
     await budget_service.release_reservation(request)
 
     return await _load_request(db, request_id)
 
 
-# ─── LIST ────────────────────────────────────────────────────────────────────
+# ─── LIST (with pagination, filters, search) ────────────────────────────────
 
-@router.get("/", response_model=List[RequestSchema])
+@router.get("/", response_model=PaginatedResponse[RequestSchema])
 async def list_requests(
     *,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
     status: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100
+    search: Optional[str] = None,
+    created_from: Optional[date] = None,
+    created_to: Optional[date] = None,
+    min_amount: Optional[float] = None,
+    max_amount: Optional[float] = None,
+    cost_center_id: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ) -> Any:
     """
-    List requests filtered by the user's role:
-    - Requester: only their own requests
-    - Technical Approver: PENDING_TECHNICAL requests + their own
-    - Financial Approver: PENDING_FINANCIAL requests + their own
+    List requests filtered by the user's role, with pagination and filters.
     """
+    base_where = Request.is_deleted == False
+
+    # Count query
+    count_q = select(func.count()).select_from(Request).where(base_where)
+    count_q = _build_role_filter(count_q, current_user)
+    count_q = _apply_filters(
+        count_q, status=status, search=search,
+        created_from=created_from, created_to=created_to,
+        min_amount=min_amount, max_amount=max_amount,
+        cost_center_id=cost_center_id,
+    )
+    total = (await db.execute(count_q)).scalar()
+
+    # Data query
     query = select(Request).options(
         selectinload(Request.items),
         selectinload(Request.cost_center),
+    ).where(base_where)
+    query = _build_role_filter(query, current_user)
+    query = _apply_filters(
+        query, status=status, search=search,
+        created_from=created_from, created_to=created_to,
+        min_amount=min_amount, max_amount=max_amount,
+        cost_center_id=cost_center_id,
     )
-
-    role_name = current_user.role.name if current_user.role else None
-
-    if role_name == "Technical Approver":
-        query = query.where(
-            or_(
-                Request.requester_id == current_user.id,
-                Request.status == RequestStatus.PENDING_TECHNICAL
-            )
-        )
-    elif role_name == "Financial Approver":
-        query = query.where(
-            or_(
-                Request.requester_id == current_user.id,
-                Request.status == RequestStatus.PENDING_FINANCIAL
-            )
-        )
-    else:
-        query = query.where(Request.requester_id == current_user.id)
-
-    if status:
-        try:
-            status_enum = RequestStatus(status)
-            query = query.where(Request.status == status_enum)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
-
     query = query.order_by(Request.created_at.desc()).offset(skip).limit(limit)
 
     result = await db.execute(query)
     requests = result.scalars().all()
-    return requests
+
+    return PaginatedResponse(items=requests, total=total, skip=skip, limit=limit)
+
+
+# ─── EXPORT ──────────────────────────────────────────────────────────────────
+
+@router.get("/export")
+async def export_requests(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    format: str = Query("excel", pattern="^(excel|pdf)$"),
+    status: Optional[str] = None,
+) -> StreamingResponse:
+    """Export requests to Excel or PDF."""
+    from app.services.export_service import export_requests_excel, export_requests_pdf
+
+    query = select(Request).options(
+        selectinload(Request.items),
+        selectinload(Request.cost_center),
+    ).where(Request.is_deleted == False)
+
+    query = _build_role_filter(query, current_user)
+
+    if status:
+        try:
+            query = query.where(Request.status == RequestStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+    query = query.order_by(Request.created_at.desc())
+    result = await db.execute(query)
+    requests_list = result.scalars().all()
+
+    if format == "pdf":
+        output = export_requests_pdf(requests_list)
+        return StreamingResponse(
+            output,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=solicitudes.pdf"},
+        )
+    else:
+        output = export_requests_excel(requests_list)
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=solicitudes.xlsx"},
+        )
 
 
 # ─── DETAIL ──────────────────────────────────────────────────────────────────
@@ -287,7 +388,7 @@ async def get_request(
     *,
     db: AsyncSession = Depends(deps.get_db),
     request_id: str,
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Get request detail with full audit trail."""
     request = await _load_request_with_logs(db, request_id)
@@ -306,7 +407,7 @@ async def get_request(
             to_status=log.to_status,
             comment=log.comment,
             ip_address=log.ip_address,
-            timestamp=log.timestamp
+            timestamp=log.timestamp,
         ))
 
     return RequestDetail(
@@ -322,7 +423,7 @@ async def get_request(
         created_at=request.created_at,
         updated_at=request.updated_at,
         items=[item for item in request.items],
-        logs=enriched_logs
+        logs=enriched_logs,
     )
 
 
@@ -333,7 +434,7 @@ async def get_request_timeline(
     *,
     db: AsyncSession = Depends(deps.get_db),
     request_id: str,
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Track & Trace: get current status, step progress, and full history."""
     request = await _load_request_with_logs(db, request_id)
@@ -356,7 +457,7 @@ async def get_request_timeline(
             to_status=log.to_status,
             comment=log.comment,
             ip_address=log.ip_address,
-            timestamp=log.timestamp
+            timestamp=log.timestamp,
         ))
 
     return RequestTimeline(
@@ -366,7 +467,7 @@ async def get_request_timeline(
         current_step=request.current_step,
         total_steps=len(steps),
         next_approver_role=next_role.name if next_role else None,
-        logs=enriched_logs
+        logs=enriched_logs,
     )
 
 
@@ -379,7 +480,7 @@ async def receive_request(
     request_id: str,
     reception_in: ReceptionInput,
     current_user: User = Depends(deps.get_current_user),
-    http_request: FastAPIRequest
+    http_request: FastAPIRequest,
 ) -> Any:
     """Confirm reception of goods. Closes the request lifecycle."""
     request = await _load_request(db, request_id)
@@ -387,7 +488,7 @@ async def receive_request(
     if request.status not in (RequestStatus.APPROVED, RequestStatus.PURCHASING, RequestStatus.RECEIVED_PARTIAL):
         raise HTTPException(
             status_code=400,
-            detail="Request must be in APPROVED, PURCHASING, or RECEIVED_PARTIAL status to receive"
+            detail="Request must be in APPROVED, PURCHASING, or RECEIVED_PARTIAL status to receive",
         )
 
     from_status = request.status
@@ -407,11 +508,10 @@ async def receive_request(
         from_status=from_status.value,
         to_status=new_status.value,
         comment=reception_in.comment,
-        ip_address=ip_address
+        ip_address=ip_address,
     )
     db.add(log)
 
-    # If full reception, commit funds from reserved to executed
     if not reception_in.is_partial:
         budget_service = BudgetService(db)
         await budget_service.commit_funds(request)
@@ -420,7 +520,7 @@ async def receive_request(
     return await _load_request(db, request_id)
 
 
-# ─── CANCEL ─────────────────────────────────────────────────────────────────
+# ─── CANCEL ──────────────────────────────────────────────────────────────────
 
 @router.post("/{request_id}/cancel", response_model=RequestSchema)
 async def cancel_request(
@@ -429,7 +529,7 @@ async def cancel_request(
     request_id: str,
     action_in: WorkflowAction,
     current_user: User = Depends(deps.get_current_user),
-    http_request: FastAPIRequest
+    http_request: FastAPIRequest,
 ) -> Any:
     """Cancel a request. Only the requester can cancel, and only in DRAFT or PENDING states."""
     request = await _load_request(db, request_id)
@@ -445,13 +545,12 @@ async def cancel_request(
     if request.status not in cancellable_statuses:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot cancel a request in {request.status.value} status"
+            detail=f"Cannot cancel a request in {request.status.value} status",
         )
 
     from_status = request.status
     ip_address = get_client_ip(http_request)
 
-    # Release budget if it was reserved (not DRAFT)
     if request.status != RequestStatus.DRAFT:
         budget_service = BudgetService(db)
         await budget_service.release_reservation(request)
@@ -465,7 +564,7 @@ async def cancel_request(
         from_status=from_status.value,
         to_status=RequestStatus.CANCELLED.value,
         comment=action_in.comment,
-        ip_address=ip_address
+        ip_address=ip_address,
     )
     db.add(log)
 
@@ -473,7 +572,7 @@ async def cancel_request(
     return await _load_request(db, request_id)
 
 
-# ─── SOFT DELETE ────────────────────────────────────────────────────────────
+# ─── SOFT DELETE ─────────────────────────────────────────────────────────────
 
 @router.delete("/{request_id}", status_code=204)
 async def delete_request(
@@ -491,9 +590,73 @@ async def delete_request(
     if request.status not in (RequestStatus.DRAFT, RequestStatus.CANCELLED):
         raise HTTPException(
             status_code=400,
-            detail="Only DRAFT or CANCELLED requests can be deleted"
+            detail="Only DRAFT or CANCELLED requests can be deleted",
         )
 
     request.is_deleted = True
     request.deleted_at = datetime.utcnow()
     await db.commit()
+
+
+# ─── COMMENTS ────────────────────────────────────────────────────────────────
+
+@router.post("/{request_id}/comments", response_model=CommentResponse, status_code=201)
+async def create_comment(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    request_id: str,
+    comment_in: CommentCreate,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Add a comment to a request."""
+    await _load_request(db, request_id)
+
+    comment = Comment(
+        request_id=request_id,
+        user_id=current_user.id,
+        text=comment_in.text,
+    )
+    db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+
+    return CommentResponse(
+        id=comment.id,
+        request_id=comment.request_id,
+        user_id=comment.user_id,
+        user_name=current_user.full_name,
+        text=comment.text,
+        created_at=comment.created_at,
+    )
+
+
+@router.get("/{request_id}/comments", response_model=List[CommentResponse])
+async def list_comments(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    request_id: str,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """List all comments for a request."""
+    await _load_request(db, request_id)
+
+    query = (
+        select(Comment)
+        .options(selectinload(Comment.user))
+        .where(Comment.request_id == request_id)
+        .order_by(Comment.created_at.asc())
+    )
+    result = await db.execute(query)
+    comments = result.scalars().all()
+
+    return [
+        CommentResponse(
+            id=c.id,
+            request_id=c.request_id,
+            user_id=c.user_id,
+            user_name=c.user.full_name if c.user else None,
+            text=c.text,
+            created_at=c.created_at,
+        )
+        for c in comments
+    ]

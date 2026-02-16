@@ -1,5 +1,7 @@
+import uuid
 import pytest
 from tests.conftest import auth_header
+from app.models.organization import CostCenter
 
 API = "/api/v1"
 
@@ -276,3 +278,192 @@ class TestTimeline:
         body = resp.json()
         assert body["current_status"] in ("PENDING_FINANCIAL", "APPROVED")
         assert len(body["logs"]) >= 2
+
+
+class TestSubmitErrorPaths:
+    async def test_submit_no_budget_defined(self, client, db, seed_data):
+        """Submit to a cost center without a budget should return 400."""
+        user = seed_data["users"]["requester"]
+        company = seed_data["company"]
+
+        cc2 = CostCenter(name="NoBudget", code="NB-001", company_id=company.id)
+        db.add(cc2)
+        await db.commit()
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(user.id),
+            json=_request_payload(str(cc2.id)),
+        )
+        req_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{API}/requests/{req_id}/submit", headers=auth_header(user.id)
+        )
+        assert resp.status_code == 400
+        assert "Budget not found" in resp.json()["detail"]
+
+    async def test_submit_insufficient_funds(self, client, seed_data):
+        """Submit when amount exceeds available budget should return 400."""
+        user = seed_data["users"]["requester"]
+        cc = seed_data["cost_center"]
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(user.id),
+            json=_request_payload(str(cc.id), amount=20000),  # 3 * 20000 = 60000 > 50000
+        )
+        req_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{API}/requests/{req_id}/submit", headers=auth_header(user.id)
+        )
+        assert resp.status_code == 400
+        assert "Insufficient" in resp.json()["detail"]
+
+    async def test_other_user_cannot_submit(self, client, seed_data):
+        """Only the requester can submit their own request."""
+        requester = seed_data["users"]["requester"]
+        tech = seed_data["users"]["tech"]
+        cc = seed_data["cost_center"]
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(requester.id),
+            json=_request_payload(str(cc.id)),
+        )
+        req_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{API}/requests/{req_id}/submit", headers=auth_header(tech.id)
+        )
+        assert resp.status_code == 403
+
+
+class TestReceiveRequest:
+    async def _create_approved_request(self, client, seed_data):
+        """Helper: create a request and advance it to APPROVED."""
+        requester = seed_data["users"]["requester"]
+        tech = seed_data["users"]["tech"]
+        fin = seed_data["users"]["financial"]
+        cc = seed_data["cost_center"]
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(requester.id),
+            json=_request_payload(str(cc.id), amount=2000),
+        )
+        req_id = resp.json()["id"]
+        await client.post(f"{API}/requests/{req_id}/submit", headers=auth_header(requester.id))
+        await client.post(
+            f"{API}/requests/{req_id}/approve",
+            headers=auth_header(tech.id),
+            json={"comment": "OK"},
+        )
+        await client.post(
+            f"{API}/requests/{req_id}/approve",
+            headers=auth_header(fin.id),
+            json={"comment": "OK"},
+        )
+        return req_id
+
+    async def test_receive_partial(self, client, seed_data):
+        req_id = await self._create_approved_request(client, seed_data)
+        resp = await client.post(
+            f"{API}/requests/{req_id}/receive",
+            headers=auth_header(seed_data["users"]["requester"].id),
+            json={"is_partial": True, "comment": "Partial delivery"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "RECEIVED_PARTIAL"
+
+    async def test_receive_full_completes(self, client, seed_data):
+        req_id = await self._create_approved_request(client, seed_data)
+        resp = await client.post(
+            f"{API}/requests/{req_id}/receive",
+            headers=auth_header(seed_data["users"]["requester"].id),
+            json={"is_partial": False, "comment": "All received"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "COMPLETED"
+
+    async def test_receive_on_draft_fails(self, client, seed_data):
+        user = seed_data["users"]["requester"]
+        cc = seed_data["cost_center"]
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(user.id),
+            json=_request_payload(str(cc.id)),
+        )
+        req_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{API}/requests/{req_id}/receive",
+            headers=auth_header(user.id),
+            json={"is_partial": False, "comment": "Nope"},
+        )
+        assert resp.status_code == 400
+
+
+class TestApproveErrorPaths:
+    async def test_approve_draft_request(self, client, seed_data):
+        """Cannot approve a DRAFT request."""
+        user = seed_data["users"]["requester"]
+        tech = seed_data["users"]["tech"]
+        cc = seed_data["cost_center"]
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(user.id),
+            json=_request_payload(str(cc.id)),
+        )
+        req_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{API}/requests/{req_id}/approve",
+            headers=auth_header(tech.id),
+            json={"comment": "Try"},
+        )
+        assert resp.status_code == 400
+
+    async def test_approve_already_approved(self, client, seed_data):
+        """Cannot approve an already APPROVED request."""
+        requester = seed_data["users"]["requester"]
+        tech = seed_data["users"]["tech"]
+        fin = seed_data["users"]["financial"]
+        cc = seed_data["cost_center"]
+
+        resp = await client.post(
+            f"{API}/requests/",
+            headers=auth_header(requester.id),
+            json=_request_payload(str(cc.id), amount=2000),
+        )
+        req_id = resp.json()["id"]
+        await client.post(f"{API}/requests/{req_id}/submit", headers=auth_header(requester.id))
+        await client.post(
+            f"{API}/requests/{req_id}/approve",
+            headers=auth_header(tech.id),
+            json={"comment": "OK"},
+        )
+        await client.post(
+            f"{API}/requests/{req_id}/approve",
+            headers=auth_header(fin.id),
+            json={"comment": "OK"},
+        )
+
+        # Try to approve again
+        resp = await client.post(
+            f"{API}/requests/{req_id}/approve",
+            headers=auth_header(tech.id),
+            json={"comment": "Again"},
+        )
+        assert resp.status_code == 400
+
+    async def test_get_nonexistent_request(self, client, seed_data):
+        user = seed_data["users"]["requester"]
+        fake_id = str(uuid.uuid4())
+        resp = await client.get(
+            f"{API}/requests/{fake_id}", headers=auth_header(user.id)
+        )
+        assert resp.status_code == 404

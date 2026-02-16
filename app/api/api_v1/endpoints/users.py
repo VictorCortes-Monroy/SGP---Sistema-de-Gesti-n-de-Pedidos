@@ -1,15 +1,16 @@
 from typing import List
 from uuid import UUID
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.core import security
 from app.models.users import User as UserModel
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
+from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter()
 
@@ -56,21 +57,28 @@ async def update_me(
     return _to_response(current_user)
 
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("/", response_model=PaginatedResponse[UserResponse])
 async def list_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ):
     """List all users (any authenticated user can see the list)."""
+    base = select(UserModel).where(UserModel.is_deleted == False)
+
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar()
+
     query = (
-        select(UserModel)
-        .options(selectinload(UserModel.role))
-        .where(UserModel.is_deleted == False)
+        base.options(selectinload(UserModel.role))
         .order_by(UserModel.full_name)
+        .offset(skip)
+        .limit(limit)
     )
     result = await db.execute(query)
     users = result.scalars().all()
-    return [_to_response(u) for u in users]
+    return {"items": [_to_response(u) for u in users], "total": total, "skip": skip, "limit": limit}
 
 
 @router.get("/{user_id}", response_model=UserResponse)

@@ -14,4 +14,7 @@ email-validator
 httpx
 pytest
 pytest-asyncio
+pytest-cov
 aiosqlite
+openpyxl
+reportlab

@@ -1,8 +1,8 @@
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_current_user
@@ -11,6 +11,7 @@ from app.models.workflow import ApprovalMatrix
 from app.schemas.approval_matrix import (
     ApprovalMatrixCreate, ApprovalMatrixUpdate, ApprovalMatrixResponse,
 )
+from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter()
 
@@ -30,23 +31,28 @@ def _to_response(rule: ApprovalMatrix) -> dict:
     return data
 
 
-@router.get("/", response_model=List[ApprovalMatrixResponse])
+@router.get("/", response_model=PaginatedResponse[ApprovalMatrixResponse])
 async def list_rules(
     company_id: UUID = None,
     cost_center_id: UUID = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(ApprovalMatrix).options(selectinload(ApprovalMatrix.role))
+    base = select(ApprovalMatrix)
     if company_id:
-        query = query.where(ApprovalMatrix.company_id == company_id)
+        base = base.where(ApprovalMatrix.company_id == company_id)
     if cost_center_id:
-        query = query.where(ApprovalMatrix.cost_center_id == cost_center_id)
-    query = query.order_by(ApprovalMatrix.step_order)
+        base = base.where(ApprovalMatrix.cost_center_id == cost_center_id)
 
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar()
+
+    query = base.options(selectinload(ApprovalMatrix.role)).order_by(ApprovalMatrix.step_order).offset(skip).limit(limit)
     result = await db.execute(query)
     rules = result.scalars().all()
-    return [_to_response(r) for r in rules]
+    return {"items": [_to_response(r) for r in rules], "total": total, "skip": skip, "limit": limit}
 
 
 @router.get("/{rule_id}", response_model=ApprovalMatrixResponse)

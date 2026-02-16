@@ -1,8 +1,8 @@
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_current_user
@@ -12,19 +12,27 @@ from app.schemas.organization import (
     CompanyCreate, CompanyUpdate, CompanyResponse, CompanyDetail,
     CostCenterCreate, CostCenterUpdate, CostCenterResponse,
 )
+from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter()
 
 
 # ── Companies ────────────────────────────────────────────
 
-@router.get("/companies", response_model=List[CompanyResponse])
+@router.get("/companies", response_model=PaginatedResponse[CompanyResponse])
 async def list_companies(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Company).order_by(Company.name))
-    return result.scalars().all()
+    base = select(Company)
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar()
+
+    query = base.order_by(Company.name).offset(skip).limit(limit)
+    result = await db.execute(query)
+    return {"items": result.scalars().all(), "total": total, "skip": skip, "limit": limit}
 
 
 @router.get("/companies/{company_id}", response_model=CompanyDetail)
@@ -103,18 +111,24 @@ async def delete_company(
 
 # ── Cost Centers ─────────────────────────────────────────
 
-@router.get("/cost-centers", response_model=List[CostCenterResponse])
+@router.get("/cost-centers", response_model=PaginatedResponse[CostCenterResponse])
 async def list_cost_centers(
     company_id: UUID = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(CostCenter)
+    base = select(CostCenter)
     if company_id:
-        query = query.where(CostCenter.company_id == company_id)
-    query = query.order_by(CostCenter.code)
+        base = base.where(CostCenter.company_id == company_id)
+
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar()
+
+    query = base.order_by(CostCenter.code).offset(skip).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    return {"items": result.scalars().all(), "total": total, "skip": skip, "limit": limit}
 
 
 @router.get("/cost-centers/{cc_id}", response_model=CostCenterResponse)

@@ -40,6 +40,7 @@ class Request(Base):
     cost_center = relationship("CostCenter", back_populates="requests")
     items = relationship("RequestItem", back_populates="request", cascade="all, delete-orphan")
     logs = relationship("WorkflowLog", back_populates="request")
+    comments = relationship("Comment", back_populates="request", cascade="all, delete-orphan")
 
 class RequestItem(Base):
     __tablename__ = "request_items"

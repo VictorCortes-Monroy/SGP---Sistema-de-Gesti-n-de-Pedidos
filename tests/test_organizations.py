@@ -1,3 +1,4 @@
+import uuid
 import pytest
 from tests.conftest import auth_header
 
@@ -11,7 +12,7 @@ class TestCompanies:
             f"{API}/organizations/companies", headers=auth_header(user.id)
         )
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        assert len(resp.json()["items"]) == 1
 
     async def test_create_company(self, client, seed_data):
         user = seed_data["users"]["admin"]
@@ -63,7 +64,7 @@ class TestCostCenters:
             f"{API}/organizations/cost-centers", headers=auth_header(user.id)
         )
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        assert len(resp.json()["items"]) == 1
 
     async def test_create_cost_center(self, client, seed_data):
         user = seed_data["users"]["admin"]
@@ -84,7 +85,7 @@ class TestCostCenters:
             headers=auth_header(user.id),
         )
         assert resp.status_code == 200
-        assert all(cc["company_id"] == str(company.id) for cc in resp.json())
+        assert all(cc["company_id"] == str(company.id) for cc in resp.json()["items"])
 
 
 class TestApprovalMatrix:
@@ -94,7 +95,7 @@ class TestApprovalMatrix:
             f"{API}/approval-matrix/", headers=auth_header(user.id)
         )
         assert resp.status_code == 200
-        assert len(resp.json()) == 2
+        assert len(resp.json()["items"]) == 2
 
     async def test_create_rule(self, client, seed_data):
         user = seed_data["users"]["admin"]
@@ -116,9 +117,76 @@ class TestApprovalMatrix:
         resp = await client.get(
             f"{API}/approval-matrix/", headers=auth_header(user.id)
         )
-        rule_id = resp.json()[0]["id"]
+        rule_id = resp.json()["items"][0]["id"]
 
         resp = await client.delete(
             f"{API}/approval-matrix/{rule_id}", headers=auth_header(user.id)
+        )
+        assert resp.status_code == 204
+
+    async def test_get_nonexistent_rule(self, client, seed_data):
+        user = seed_data["users"]["admin"]
+        resp = await client.get(
+            f"{API}/approval-matrix/{uuid.uuid4()}", headers=auth_header(user.id)
+        )
+        assert resp.status_code == 404
+
+
+class TestOrganizationErrors:
+    async def test_get_nonexistent_company(self, client, seed_data):
+        user = seed_data["users"]["requester"]
+        resp = await client.get(
+            f"{API}/organizations/companies/{uuid.uuid4()}",
+            headers=auth_header(user.id),
+        )
+        assert resp.status_code == 404
+
+    async def test_update_nonexistent_company(self, client, seed_data):
+        user = seed_data["users"]["admin"]
+        resp = await client.put(
+            f"{API}/organizations/companies/{uuid.uuid4()}",
+            headers=auth_header(user.id),
+            json={"name": "Ghost"},
+        )
+        assert resp.status_code == 404
+
+    async def test_delete_company(self, client, seed_data):
+        user = seed_data["users"]["admin"]
+        # Create a company without dependencies
+        resp = await client.post(
+            f"{API}/organizations/companies",
+            headers=auth_header(user.id),
+            json={"name": "ToDelete", "tax_id": "99.999.999-9"},
+        )
+        company_id = resp.json()["id"]
+
+        resp = await client.delete(
+            f"{API}/organizations/companies/{company_id}",
+            headers=auth_header(user.id),
+        )
+        assert resp.status_code == 204
+
+    async def test_get_nonexistent_cost_center(self, client, seed_data):
+        user = seed_data["users"]["requester"]
+        resp = await client.get(
+            f"{API}/organizations/cost-centers/{uuid.uuid4()}",
+            headers=auth_header(user.id),
+        )
+        assert resp.status_code == 404
+
+    async def test_delete_cost_center(self, client, seed_data):
+        user = seed_data["users"]["admin"]
+        company = seed_data["company"]
+        # Create a CC to delete
+        resp = await client.post(
+            f"{API}/organizations/cost-centers",
+            headers=auth_header(user.id),
+            json={"name": "Temp", "code": "TMP-001", "company_id": str(company.id)},
+        )
+        cc_id = resp.json()["id"]
+
+        resp = await client.delete(
+            f"{API}/organizations/cost-centers/{cc_id}",
+            headers=auth_header(user.id),
         )
         assert resp.status_code == 204

@@ -5,7 +5,7 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
+from sqlalchemy import text, event
 
 from app.db.base import Base
 from app.main import app
@@ -144,6 +144,28 @@ async def seed_data(db: AsyncSession):
         "cost_center": cc,
         "budget": budget,
     }
+
+
+@pytest_asyncio.fixture
+async def query_counter():
+    """Counts SQL queries executed during a test block for N+1 detection."""
+    class Counter:
+        def __init__(self):
+            self.count = 0
+            self.queries = []
+
+        def reset(self):
+            self.count = 0
+            self.queries = []
+
+        def callback(self, conn, cursor, statement, parameters, context, executemany):
+            self.count += 1
+            self.queries.append(statement)
+
+    counter = Counter()
+    event.listen(engine_test.sync_engine, "before_cursor_execute", counter.callback)
+    yield counter
+    event.remove(engine_test.sync_engine, "before_cursor_execute", counter.callback)
 
 
 def get_token(user_id) -> str:

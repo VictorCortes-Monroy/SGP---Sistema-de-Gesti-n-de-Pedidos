@@ -9,7 +9,7 @@ class TestBudget:
         user = seed_data["users"]["requester"]
         resp = await client.get(f"{API}/budgets/", headers=auth_header(user.id))
         assert resp.status_code == 200
-        budgets = resp.json()
+        budgets = resp.json()["items"]
         assert len(budgets) == 1
         assert float(budgets[0]["total_amount"]) == 50000.0
         assert float(budgets[0]["available_amount"]) == 50000.0
@@ -35,7 +35,7 @@ class TestBudget:
 
         # Check reserved
         resp = await client.get(f"{API}/budgets/", headers=auth_header(requester.id))
-        budget = resp.json()[0]
+        budget = resp.json()["items"][0]
         assert float(budget["reserved_amount"]) == 6000.0
         assert float(budget["available_amount"]) == 44000.0
 
@@ -60,7 +60,7 @@ class TestBudget:
 
         # Check committed
         resp = await client.get(f"{API}/budgets/", headers=auth_header(requester.id))
-        budget = resp.json()[0]
+        budget = resp.json()["items"][0]
         assert float(budget["reserved_amount"]) == 0.0
         assert float(budget["executed_amount"]) == 6000.0
         assert float(budget["available_amount"]) == 44000.0
@@ -91,5 +91,5 @@ class TestBudget:
 
         # Budget should be fully released
         resp = await client.get(f"{API}/budgets/", headers=auth_header(requester.id))
-        budget = resp.json()[0]
+        budget = resp.json()["items"][0]
         assert float(budget["reserved_amount"]) == 0.0
