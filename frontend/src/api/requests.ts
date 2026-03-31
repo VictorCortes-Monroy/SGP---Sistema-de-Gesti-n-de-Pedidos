@@ -2,7 +2,7 @@ import apiClient from './client'
 import type {
   PaginatedResponse, RequestResponse, RequestDetail,
   RequestCreate, RequestFilters, RequestTimeline,
-  WorkflowAction, ReceptionInput, CommentResponse,
+  WorkflowAction, ReceptionInput, CommentResponse, RequestDocument,
 } from './types'
 
 export const requestsApi = {
@@ -85,5 +85,25 @@ export const requestsApi = {
   addComment: async (id: string, text: string): Promise<CommentResponse> => {
     const { data } = await apiClient.post(`/requests/${id}/comments`, { text })
     return data
+  },
+
+  getDocuments: async (id: string): Promise<RequestDocument[]> => {
+    const { data } = await apiClient.get(`/requests/${id}/documents`)
+    return data
+  },
+
+  uploadDocument: async (id: string, file: File, notes?: string): Promise<RequestDocument> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (notes) formData.append('notes', notes)
+    const { data } = await apiClient.post(`/requests/${id}/documents`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+
+  getDocumentDownloadUrl: (docId: string): string => {
+    const base = (apiClient.defaults.baseURL || '').replace(/\/$/, '')
+    return `${base}/requests/documents/${docId}/download`
   },
 }

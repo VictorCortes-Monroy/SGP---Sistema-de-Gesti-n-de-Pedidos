@@ -7,35 +7,51 @@ import {
   Building2,
   MapPin,
   ShieldCheck,
+  ScrollText,
   ChevronLeft,
   ChevronRight,
+  Wrench,
+  HardHat,
+  Truck,
+  Bell,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import { useUIStore } from '@/stores/ui-store'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 import { Separator } from '@/components/ui/separator'
+import { useMaintAlertCount } from '@/hooks/use-maintenance'
 
 interface NavItem {
   label: string
   href: string
   icon: React.ComponentType<{ className?: string }>
-  adminOnly?: boolean
 }
 
 const mainNav: NavItem[] = [
   { label: 'Inicio', href: '/', icon: LayoutDashboard },
-  { label: 'Solicitudes', href: '/solicitudes', icon: FileText },
+  { label: 'Solicitudes de Pedido', href: '/solicitudes', icon: FileText },
   { label: 'Presupuestos', href: '/presupuestos', icon: DollarSign },
 ]
 
-const adminNav: NavItem[] = [
-  { label: 'Usuarios', href: '/admin/usuarios', icon: Users, adminOnly: true },
-  { label: 'Empresas', href: '/admin/empresas', icon: Building2, adminOnly: true },
-  { label: 'Centros de Costo', href: '/admin/centros-costo', icon: MapPin, adminOnly: true },
-  { label: 'Matriz Aprobacion', href: '/admin/matriz-aprobacion', icon: ShieldCheck, adminOnly: true },
+const maintNav: NavItem[] = [
+  { label: 'Dashboard', href: '/mantencion', icon: Wrench },
+  { label: 'Equipos', href: '/equipos', icon: Truck },
+  { label: 'Solicitudes de Mantención', href: '/mantencion/solicitudes', icon: HardHat },
+  { label: 'Alertas SLA', href: '/mantencion/alertas', icon: Bell },
 ]
+
+const adminNav: NavItem[] = [
+  { label: 'Usuarios', href: '/admin/usuarios', icon: Users },
+  { label: 'Empresas', href: '/admin/empresas', icon: Building2 },
+  { label: 'Centros de Costo', href: '/admin/centros-costo', icon: MapPin },
+  { label: 'Matriz Aprobacion', href: '/admin/matriz-aprobacion', icon: ShieldCheck },
+  { label: 'Auditoria', href: '/admin/auditoria', icon: ScrollText },
+]
+
+const MAINT_ROLES = ['Admin', 'maintenance_planner', 'maintenance_chief']
 
 export function Sidebar() {
   const location = useLocation()
@@ -43,6 +59,9 @@ export function Sidebar() {
   const collapsed = useUIStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const isAdmin = user?.role_name === 'Admin'
+  const isMaintenance = MAINT_ROLES.includes(user?.role_name ?? '')
+  const { data: alertCountData } = useMaintAlertCount()
+  const alertCount = isMaintenance ? (alertCountData?.count ?? 0) : 0
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -72,7 +91,7 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 p-2">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-2">
           {mainNav.map((item) => (
             <SidebarLink
               key={item.href}
@@ -81,6 +100,31 @@ export function Sidebar() {
               collapsed={collapsed}
             />
           ))}
+
+          {/* Maintenance section */}
+          {isMaintenance && (
+            <>
+              <Separator className="my-3" />
+              <div className={cn('px-2 py-1', collapsed && 'sr-only')}>
+                <span className="text-xs font-semibold uppercase text-muted-foreground">
+                  Mantencion
+                </span>
+              </div>
+              {maintNav.map((item) => (
+                <SidebarLink
+                  key={item.href}
+                  item={item}
+                  active={
+                    item.href === '/mantencion'
+                      ? location.pathname === '/mantencion'
+                      : location.pathname.startsWith(item.href)
+                  }
+                  collapsed={collapsed}
+                  badge={item.href === '/mantencion/alertas' && alertCount > 0 ? alertCount : undefined}
+                />
+              ))}
+            </>
+          )}
 
           {isAdmin && (
             <>
@@ -122,10 +166,12 @@ function SidebarLink({
   item,
   active,
   collapsed,
+  badge,
 }: {
   item: NavItem
   active: boolean
   collapsed: boolean
+  badge?: number
 }) {
   const link = (
     <Link
@@ -138,8 +184,20 @@ function SidebarLink({
         collapsed && 'justify-center px-2'
       )}
     >
-      <item.icon className="h-4 w-4 shrink-0" />
-      {!collapsed && <span>{item.label}</span>}
+      <span className="relative shrink-0">
+        <item.icon className="h-4 w-4" />
+        {badge && collapsed && (
+          <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-white">
+            {badge > 9 ? '9+' : badge}
+          </span>
+        )}
+      </span>
+      {!collapsed && <span className="flex-1">{item.label}</span>}
+      {!collapsed && badge ? (
+        <Badge variant="destructive" className="h-5 min-w-5 px-1 text-xs">
+          {badge > 99 ? '99+' : badge}
+        </Badge>
+      ) : null}
     </Link>
   )
 
@@ -147,7 +205,7 @@ function SidebarLink({
     return (
       <Tooltip>
         <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side="right">{item.label}</TooltipContent>
+        <TooltipContent side="right">{item.label}{badge ? ` (${badge})` : ''}</TooltipContent>
       </Tooltip>
     )
   }

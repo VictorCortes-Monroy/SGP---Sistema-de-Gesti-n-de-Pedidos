@@ -7,3 +7,10 @@ export function useBudgets() {
     queryFn: () => budgetsApi.list(),
   })
 }
+
+export function useBudgetReport(year?: number, companyId?: string) {
+  return useQuery({
+    queryKey: ['budget-report', year, companyId],
+    queryFn: () => budgetsApi.getReport(year, companyId),
+  })
+}

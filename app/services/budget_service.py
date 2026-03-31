@@ -26,28 +26,23 @@ class BudgetService:
         """
         Creates a reservation for the request amount.
         Should be called when moving from DRAFT to PENDING.
+        Budget is treated as a reference value only — no availability check blocks submission.
         """
         budget = await self.get_budget(request.cost_center_id)
         if not budget:
-             raise ValueError("Budget not found for this Cost Center")
-        
-        # Double check availability with lock potentially, but for now simple check
-        available = budget.total_amount - budget.reserved_amount - budget.executed_amount
-        if available < request.total_amount:
-            raise ValueError(f"Insufficient funds. Available: {available}, Required: {request.total_amount}")
-            
-        # Create Reservation
+            return  # No budget configured for this cost center — allow without reservation
+
+        # Create Reservation (no availability check — budget is reference only)
         reservation = BudgetReservation(
             budget_id=budget.id,
             request_id=request.id,
             amount=request.total_amount
         )
         self.db.add(reservation)
-        
+
         # Update Budget Aggregate (Denormalization for speed)
         budget.reserved_amount += request.total_amount
-        # db.add(budget) # Already attached to session
-        
+
         await self.db.commit()
 
     async def commit_funds(self, request: Request):

@@ -36,6 +36,19 @@ export interface UserResponse {
 }
 
 // ── Request ──
+export type PurchaseType = 'INSUMOS' | 'ACTIVOS_FIJOS' | 'OTROS_SERVICIOS'
+
+export interface RequestDocument {
+  id: string
+  request_id: string
+  file_name: string
+  file_size: number | null
+  mime_type: string | null
+  uploaded_by_name: string | null
+  uploaded_at: string | null
+  notes: string | null
+}
+
 export interface RequestItem {
   id: string
   description: string
@@ -56,6 +69,7 @@ export interface RequestCreate {
   title: string
   description?: string
   cost_center_id: string
+  purchase_type?: PurchaseType
   items: RequestItemCreate[]
 }
 
@@ -68,6 +82,7 @@ export interface RequestResponse {
   requester_id: string
   requester_name: string | null
   status: RequestStatus
+  purchase_type: PurchaseType
   total_amount: number
   currency: string
   current_step: number
@@ -92,6 +107,7 @@ export interface WorkflowLogResponse {
 
 export interface RequestDetail extends RequestResponse {
   logs: WorkflowLogResponse[]
+  documents: RequestDocument[]
 }
 
 export interface RequestTimeline {
@@ -159,4 +175,367 @@ export interface CommentResponse {
   user_name: string | null
   text: string
   created_at: string
+}
+
+// ── Budget Report ──
+export interface BudgetReportItem {
+  cost_center_id: string
+  cost_center_name: string
+  cost_center_code: string
+  total_amount: number
+  reserved_amount: number
+  executed_amount: number
+  available_amount: number
+  utilization_pct: number
+}
+
+export interface CompanyBudgetGroup {
+  company_id: string
+  company_name: string
+  total_amount: number
+  reserved_amount: number
+  executed_amount: number
+  available_amount: number
+  budgets: BudgetReportItem[]
+}
+
+export interface BudgetReportResponse {
+  year: number
+  groups: CompanyBudgetGroup[]
+  grand_total: number
+  grand_reserved: number
+  grand_executed: number
+  grand_available: number
+}
+
+// ── Dashboard ──
+export interface PendingActionItem {
+  request_id: string
+  title: string
+  status: string
+  total_amount: number
+  requester_name: string | null
+  created_at: string
+}
+
+export interface RecentRequestItem {
+  id: string
+  title: string
+  status: string
+  total_amount: number
+  created_at: string
+}
+
+export interface BudgetSummaryItem {
+  cost_center_name: string
+  total_amount: number
+  reserved_amount: number
+  executed_amount: number
+  available_amount: number
+}
+
+export interface DashboardSummary {
+  total_requests: number
+  status_distribution: Record<string, number>
+  pending_actions: PendingActionItem[]
+  recent_requests: RecentRequestItem[]
+  budget_summary: BudgetSummaryItem[]
+}
+
+// ── Audit ──
+export interface AuditLogEntry {
+  id: string
+  request_id: string
+  actor_id: string
+  actor_name: string | null
+  actor_role: string | null
+  action: string
+  from_status: string | null
+  to_status: string | null
+  comment: string | null
+  ip_address: string | null
+  timestamp: string
+  request_title: string | null
+}
+
+export interface AuditLogFilters {
+  date_from?: string
+  date_to?: string
+  action?: string
+  actor_id?: string
+  request_id?: string
+  skip?: number
+  limit?: number
+}
+
+// ── Maintenance Module ──
+export type EquipmentStatus = 'OPERATIVE' | 'IN_TRANSIT' | 'IN_MAINTENANCE' | 'OUT_OF_SERVICE' | 'SCRAPPED'
+export type EquipmentType = 'EXCAVATOR' | 'CRANE' | 'TRUCK' | 'GENERATOR' | 'COMPRESSOR' | 'PUMP' | 'FORKLIFT' | 'OTHER'
+
+export interface MaintEquipment {
+  id: string
+  code: string
+  name: string
+  equipment_type: EquipmentType
+  brand: string | null
+  model: string | null
+  model_year: number | null
+  serial_number: string | null
+  status: EquipmentStatus
+  company_id: string
+  cost_center_id: string | null
+  current_horometer: number
+  maintenance_interval_hours: number
+  last_maintenance_date: string | null
+  next_maintenance_due: number | null
+  last_certificate_id: string | null
+  notes: string | null
+  is_active: boolean
+}
+
+export interface HorometerUpdate {
+  reading: number
+  notes?: string
+}
+
+export interface HorometerLogEntry {
+  id: string
+  reading: number
+  previous_reading: number | null
+  hours_delta: number | null
+  recorded_by_name: string | null
+  recorded_at: string | null
+  notes: string | null
+}
+
+export interface EquipmentCreate {
+  code?: string
+  name: string
+  equipment_type: EquipmentType
+  brand?: string
+  model?: string
+  model_year?: number
+  serial_number?: string
+  company_id: string
+  cost_center_id?: string
+  current_horometer?: number
+  maintenance_interval_hours?: number
+  notes?: string
+}
+
+export interface MaintProvider {
+  id: string
+  rut: string
+  name: string
+  contact_name: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  specialties: string | null
+  address: string | null
+  is_active: boolean
+  rating: number | null
+  equipment_types: EquipmentType[]
+}
+
+export type MaintRequestStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'QUOTED_PENDING'
+  | 'AWAITING_PREREQUISITES'
+  | 'READY_FOR_EXECUTION'
+  | 'IN_TRANSIT_TO_WORKSHOP'
+  | 'IN_MAINTENANCE'
+  | 'PENDING_RECEPTION'
+  | 'PENDING_CERTIFICATE'
+  | 'IN_TRANSIT_TO_FIELD'
+  | 'COMPLETED'
+  | 'PENDING_D5'
+  | 'INVOICING_READY'
+  | 'PENDING_PAYMENT'
+  | 'CLOSED'
+  | 'REJECTED'
+  | 'CANCELLED'
+
+export type MaintenanceType = 'PREVENTIVE' | 'CORRECTIVE' | 'PREDICTIVE' | 'OVERHAUL'
+
+export interface MaintRequestCreate {
+  equipment_id: string
+  provider_id?: string
+  maintenance_type: MaintenanceType
+  description: string
+  estimated_cost?: number
+  currency?: string
+  planned_date: string
+}
+
+export interface MaintRequestResponse {
+  id: string
+  code: string
+  equipment_id: string
+  provider_id: string | null
+  requested_by_id: string
+  approved_by_id: string | null
+  maintenance_type: MaintenanceType
+  status: MaintRequestStatus
+  description: string
+  estimated_cost: number | null
+  actual_cost: number | null
+  currency: string
+  planned_date: string
+  scheduled_start: string | null
+  completed_at: string | null
+  sgp_request_id: string | null
+  purchase_order_code: string | null
+  provider_confirmed: boolean
+  transport_scheduled: boolean
+  invoice_number: string | null
+  invoice_amount: number | null
+  d2_quotation_amount: number | null
+  d2_quotation_notes: string | null
+  d2_registered_at: string | null
+  d5_signed_at: string | null
+  d5_signed_by_id: string | null
+  payment_confirmed_at: string | null
+  payment_confirmed_by_id: string | null
+  rejection_reason: string | null
+  remediation_deadline: string | null
+  notes: string | null
+  created_at: string
+}
+
+export interface ChecklistGroup {
+  [key: string]: boolean
+}
+
+export interface ChecklistInput {
+  scope_verification: ChecklistGroup
+  equipment_condition: ChecklistGroup
+  operational_tests: ChecklistGroup
+  provider_documentation: ChecklistGroup
+}
+
+export interface ReceptionPayload {
+  status: 'APPROVED' | 'REJECTED'
+  checklist: ChecklistInput
+  notes?: string
+}
+
+export interface CloseInput {
+  invoice_number: string
+  invoice_amount: number
+}
+
+// Gate prerequisites timeline structure
+export interface GateStatusResponse {
+  request_id: string
+  purchase_order_linked: boolean
+  provider_confirmed: boolean
+  transport_scheduled: boolean
+  gate_approved: boolean
+  missing: string[]
+}
+
+// ── Admin ──
+export interface RoleResponse {
+  id: string
+  name: string
+  description: string | null
+}
+
+export interface UserCreate {
+  email: string
+  full_name: string
+  password: string
+  role_id: string
+  is_active?: boolean
+}
+
+export interface UserUpdate {
+  email?: string
+  full_name?: string
+  password?: string
+  role_id?: string
+  is_active?: boolean
+}
+
+export interface CompanyCreate {
+  name: string
+  tax_id?: string
+}
+
+export interface CompanyUpdate {
+  name?: string
+  tax_id?: string
+}
+
+export interface CostCenterCreate {
+  name: string
+  code: string
+  company_id: string
+}
+
+export interface CostCenterUpdate {
+  name?: string
+  code?: string
+}
+
+export interface ApprovalMatrixCreate {
+  company_id: string
+  cost_center_id?: string
+  min_amount: number
+  max_amount?: number
+  role_id: string
+  step_order: number
+}
+
+export interface ApprovalMatrixResponse {
+  id: string
+  company_id: string
+  cost_center_id: string | null
+  min_amount: number
+  max_amount: number | null
+  role_id: string
+  role_name: string | null
+  step_order: number
+}
+
+// ── Maintenance Analytics ──
+export interface EquipmentDueAlert {
+  equipment_id: string
+  equipment_name: string
+  code: string
+  current_horometer: number
+  next_maintenance_due: number
+  hours_remaining: number
+}
+
+export interface MaintenanceAnalyticsSummary {
+  total_preventive: number
+  total_corrective: number
+  in_execution: number
+  pending_reception: number
+  pending_certificate: number
+  average_cycle_time_days: number
+  upcoming_maintenance: EquipmentDueAlert[]
+}
+
+// ── SLA Alerts ──
+export type AlertType =
+  | 'SLA_PENDING_APPROVAL'
+  | 'SLA_PROVIDER_CONFIRM'
+  | 'SLA_RECEPTION'
+  | 'SLA_EQUIPMENT_DUE'
+
+export interface MaintAlert {
+  id: string
+  alert_type: AlertType
+  target_role: string
+  message: string
+  hours_overdue: number | null
+  request_id: string | null
+  equipment_id: string | null
+  is_read: boolean
+  created_at: string
+  resolved_at: string | null
 }

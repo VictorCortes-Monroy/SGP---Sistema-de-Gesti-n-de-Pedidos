@@ -113,3 +113,27 @@ export function useReceiveRequest() {
     },
   })
 }
+
+export function useRequestDocuments(id: string) {
+  return useQuery({
+    queryKey: ['request', id, 'documents'],
+    queryFn: () => requestsApi.getDocuments(id),
+    enabled: !!id,
+  })
+}
+
+export function useUploadRequestDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, file, notes }: { id: string; file: File; notes?: string }) =>
+      requestsApi.uploadDocument(id, file, notes),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ['request', id, 'documents'] })
+      qc.invalidateQueries({ queryKey: ['request', id] })
+      toast.success('Documento adjuntado')
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'Error al subir documento')
+    },
+  })
+}

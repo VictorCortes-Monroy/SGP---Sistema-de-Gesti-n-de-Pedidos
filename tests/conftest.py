@@ -66,6 +66,24 @@ async def setup_db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.execute(text("DROP TYPE IF EXISTS requeststatus CASCADE"))
         await conn.run_sync(Base.metadata.create_all)
+        
+        await conn.execute(text("CREATE SEQUENCE IF NOT EXISTS maint_request_seq START WITH 1 INCREMENT BY 1;"))
+        func_sql = """
+        CREATE OR REPLACE FUNCTION generate_sm_code()
+        RETURNS VARCHAR AS $$
+        DECLARE
+            seq_val INTEGER;
+            year_val VARCHAR;
+            next_code VARCHAR;
+        BEGIN
+            SELECT nextval('maint_request_seq') INTO seq_val;
+            SELECT to_char(CURRENT_DATE, 'YYYY') INTO year_val;
+            next_code := 'SM-' || year_val || '-' || LPAD(seq_val::text, 4, '0');
+            RETURN next_code;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+        await conn.execute(text(func_sql))
     yield
     # Clean up after test
     await engine_test.dispose()

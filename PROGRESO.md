@@ -84,18 +84,229 @@
   - Endpoint: `GET /requests/export?format=excel|pdf`
   - Tests: 3 tests en `test_export.py`
 
-### FASE 7: Reportes & Analytics (MEDIA)
-- [ ] **Reporte de presupuesto** por empresa/CC
-- [ ] **Dashboard de solicitudes** (pendientes, aprobadas, rechazadas)
-- [ ] **Estadísticas** (promedio tiempo aprobación, tasa rechazo)
-- [ ] **Reporte de auditoría** (WorkflowLog exportable)
-- [ ] **Endpoint analytics**: `GET /analytics/summary`
+### FASE 7: Reportes, Dashboard Mejorado & Auditoría - COMPLETADA ✅
+- [x] **Reporte de presupuesto** por empresa/CC con filtros (año, empresa)
+  - Backend: `GET /budgets/report`, `GET /budgets/report/export?format=excel|pdf`
+  - Schemas: `BudgetReportItem`, `CompanyBudgetGroup`, `BudgetReportResponse`
+  - Frontend: página `/presupuestos` con cards resumen, tablas por empresa, barras de utilización %
+  - Exportación Excel/PDF funcional
+- [x] **Dashboard mejorado** con endpoint consolidado
+  - Backend: `GET /dashboard/summary` - 1 query retorna todo (status_distribution, pending_actions, budget_summary, recent_requests)
+  - Pending actions según rol: Admin→PENDING_*, Tech→PENDING_TECHNICAL, Fin→PENDING_FINANCIAL, Requester→DRAFT/REJECTED propios
+  - Frontend: pills de distribución por estado (clickeables), card acciones pendientes con links, budget chart con % y warning >80%
+- [x] **Reporte de auditoría** exportable (solo Admin)
+  - Backend: `GET /audit/logs`, `GET /audit/logs/export?format=excel|pdf`
+  - Filtros: date_from, date_to, action, actor_id, request_id
+  - Frontend: página `/admin/auditoria` con tabla, filtros, paginación, export Excel/PDF
+  - Sidebar actualizado con link "Auditoría" en sección admin
 
-### FASE 8: Notificaciones (BAJA)
-- [ ] **Email notifications** al cambiar estado de solicitud
+---
+
+## MÓDULO DE MANTENCIÓN PREVENTIVA (docs 10–15)
+
+> **Contexto:** Los documentos 10–15 especifican un nuevo módulo integrado que conecta el ciclo de mantención de equipos con el ciclo de compras del SGP. Principio rector: *"el flujo documental va ADELANTE o EN PARALELO al flujo físico, nunca detrás."*
+>
+> **Integración clave (RF-M07):** SM aprobada → crea automáticamente `Request` en SGP → OC generada → actualiza SM. Extensión limpia: 8 tablas `maint_*`, 2 nuevos roles, endpoints `/maintenance/` y `/equipment/`, sin modificar código core.
+>
+> **Timeline estimado:** ~13 semanas (3 meses) en 7 fases (M0–M6).
+
+### FASE M0: Infraestructura Base (1 semana) — COMPLETADA ✅
+- [x] **8 modelos SQLAlchemy** con prefijo `maint_`:
+  - `maint_equipment` + `maint_horometer_logs` (`app/models/maintenance/equipment.py`)
+  - `maint_providers` + `maint_provider_equipment_types` (`app/models/maintenance/provider.py`)
+  - `maint_requests` con enum `MaintRequestStatus` (13 estados) (`app/models/maintenance/request.py`)
+  - `maint_reception_checklists` (`app/models/maintenance/checklist.py`)
+  - `maint_certificates` (`app/models/maintenance/certificate.py`)
+  - `maint_transport_schedule` (`app/models/maintenance/transport.py`)
+- [x] **Migración Alembic incremental** con secuencia `maint_request_seq` y función `generate_sm_code()` (formato SM-YYYY-NNNN)
+- [x] **Schemas Pydantic base** (`app/schemas/maintenance/`)
+- [x] **Roles nuevos** en `scripts/initial_data.py`: `maintenance_planner`, `maintenance_chief`
+- [x] **Router skeleton** registrado en `app/api/api_v1/api.py`
+- [x] **Tests estructura**: tablas creadas, roles existentes
+
+### FASE M1: CRUD Equipos + Proveedores + SM Básica (2 semanas) — COMPLETADA ✅
+- [x] **CRUD Equipos** (`GET/POST/PUT/DELETE /equipment/`, `PUT /equipment/{id}/horometer`) — con recálculo automático de `next_maintenance_due`
+- [x] **CRUD Proveedores** (`GET/POST/PUT /maintenance/providers/`)
+- [x] **SM básica** (`app/api/api_v1/endpoints/maintenance/requests.py`):
+  - `POST /maintenance/requests/` — crear SM con código correlativo
+  - `GET /maintenance/requests/` — listar con filtros (status, equipment_id, planned_date)
+  - `GET /maintenance/requests/{id}` — detalle
+  - `POST /maintenance/requests/{id}/submit` — DRAFT → PENDING_APPROVAL
+  - `POST /maintenance/requests/{id}/approve` — PENDING_APPROVAL → APPROVED + AWAITING_PREREQUISITES
+  - `POST /maintenance/requests/{id}/reject` — PENDING_APPROVAL → REJECTED
+- [x] **Servicio SM** (`app/services/maintenance/sm_service.py`) — lógica de transiciones
+- [x] **Tests M1**: 8 equipos + 5 proveedores + 8 SM básica
+
+### FASE M2: Flujos Paralelos + Gate de Control (2 semanas) — COMPLETADA ✅
+- [x] **Auto-creación de Solicitud de Compra en SGP** al aprobar SM (`create_purchase_request_from_sm()` vía `WorkflowEngine` existente)
+- [x] **Confirmación de proveedor** (`POST /maintenance/requests/{id}/confirm-provider`)
+- [x] **Programación cama baja** (`POST /maintenance/requests/{id}/schedule-transport`) + detección de conflictos (`GET /maintenance/transport/conflicts`)
+- [x] **Hook OC→SM** (`POST /maintenance/requests/{id}/link-purchase-order`) — actualiza `purchase_order_code` en SM
+- [x] **Gate de control** (`check_gate_prerequisites()`) — verifica 3 condiciones: OC vinculada, proveedor confirmado, transporte programado
+- [x] **Auto-transición** AWAITING_PREREQUISITES → READY_FOR_EXECUTION cuando se cumple la última condición
+- [x] **Endpoint gate status** (`GET /maintenance/requests/{id}/gate-status`) — pills de estado por condición
+- [x] **Tests M2**: 10 gate + 5 integración SM↔SGP
+
+### FASE M3: Ejecución + Recepción Conforme (2 semanas) — COMPLETADA ✅
+- [x] **Inicio ejecución** (`POST .../start-execution`) — READY_FOR_EXECUTION → IN_TRANSIT_TO_WORKSHOP, equipo status=IN_TRANSIT
+- [x] **Llegada al taller** (`POST .../confirm-workshop-arrival`) — → IN_MAINTENANCE, equipo status=IN_MAINTENANCE
+- [x] **Fin ejecución** (`POST .../complete-execution`) — IN_MAINTENANCE → PENDING_RECEPTION
+- [x] **Recepción conforme** (`POST .../reception`) con checklist JSONB en 4 grupos:
+  - scope_verification, equipment_condition, operational_tests, provider_documentation
+  - Resultado OK → PENDING_CERTIFICATE
+  - Resultado RECHAZADO → IN_MAINTENANCE (con `remediation_deadline`)
+- [x] **Schemas checklist** (`app/schemas/maintenance/checklist.py`) — `ChecklistInput`, `ChecklistResponse`
+- [x] **Tests M3**: Ejecución completa y endpoints de recepción, pruebas de check OK e iteración de rechazos
+
+### FASE M4: Certificado + Cierre + Analytics (2 semanas) — COMPLETADA ✅
+- [x] **Upload certificado PDF** (`POST .../upload-certificate`) — SHA-256 hash, crea `MaintCertificate`, → IN_TRANSIT_TO_FIELD
+- [x] **Retorno equipo** (`POST .../confirm-field-return`) — → COMPLETED, actualiza equipo: `status=OPERATIVE`, `last_maintenance_date`, `last_certificate_id`, `next_maintenance_due += interval`
+- [x] **Cierre formal** (`POST .../close`) — con factura (`invoice_number`, `invoice_amount`)
+- [x] **Timeline completo** (`GET /maintenance/requests/{id}/timeline`) — 16 acciones en workflow_logs
+- [x] **Export Excel** (`GET /maintenance/requests/export`) — reutiliza `export_service.py`
+- [x] **Analytics** (`GET /maintenance/analytics/summary`) — KPIs: equipos próximos a umbral, SMs por estado, tasa recepción conforme, próximas fechas
+- [x] **Tests M4**: 6 certificado + 4 analytics
+
+### FASE M5: Frontend (3 semanas) — COMPLETADA ✅
+- [x] **Types + API clients + hooks** — `MaintenanceAnalyticsSummary`, `EquipmentDueAlert`, `getAnalyticsSummary()`, `useMaintAnalytics()`
+- [x] **5 páginas nuevas:**
+  - `/mantencion` — Dashboard mantención: KPIs (PM/CM/En Ejecución/Pend.Recepción), tiempo ciclo, alertas equipos próximos a umbral
+  - `/equipos` — Lista equipos con filtros + modal horómetro (existía parcialmente, corregida)
+  - `/mantencion/solicitudes` — Lista SMs con filtros status/búsqueda, paginación, export Excel
+  - `/mantencion/solicitudes/nueva` — Formulario crear SM (equipo, tipo, descripción, fecha, proveedor opcional, costo)
+  - `/mantencion/solicitudes/:id` — Detalle SM: gate status (3 pills), timeline, acciones por rol
+- [x] **5 componentes nuevos:**
+  - `sm-status-badge.tsx` — Badge para 13 estados con colores
+  - `gate-status-card.tsx` — Card con 3 pills (OC, Proveedor, Transporte)
+  - `sm-timeline.tsx` — Timeline de workflow_logs con ACTION_LABELS
+  - `sm-request-table.tsx` — Tabla SMs con código correlativo y estados
+  - `sm-actions.tsx` — Todos los botones + diálogos del ciclo de vida completo (submit, approve, reject, confirm-provider, schedule-transport, link-PO, start-execution, arrive, complete, reception checklist, upload cert, field-return, close)
+- [x] **Sidebar** — Sección "Mantención" con Dashboard, Equipos, Solicitudes SM (visible para `maintenance_*` y Admin)
+- [x] **Routing** en `App.tsx` — 5 nuevas rutas bajo `/mantencion/` y `/equipos`
+- [x] **Build Docker** exitoso — sin errores TypeScript
+
+---
+
+## ALINEACIÓN AL FLUJO COMERCIAL COMPLETO (SGP_MAINT_DEV_SPEC.md)
+
+> **Estrategia:** Extensión sin ruptura sobre M0–M5. Se agregan 5 estados + flujo documental al final del ciclo de vida existente.
+
+### ETAPA 1: Roles + Sidebar — COMPLETADA ✅
+- [x] Roles `purchasing` (Abastecimiento) y `finance` (Finanzas) en `scripts/initial_data.py`
+- [x] Usuarios seed: `purchasing@example.com`, `finance@example.com` (password: `password`)
+- [x] Sidebar admin: Usuarios, Empresas, Centros de Costo, Matriz Aprobación, Auditoría
+
+### ETAPA 2: Nuevos Estados + Migración + Campos Modelo — COMPLETADA ✅
+- [x] `MaintRequestStatus` extendido con 5 nuevos estados: `QUOTED_PENDING`, `PENDING_D5`, `INVOICING_READY`, `PENDING_PAYMENT`, `CLOSED`
+- [x] Campos D2 en `maint_requests`: `d2_quotation_amount`, `d2_quotation_notes`, `d2_registered_at`
+- [x] Campos D5 en `maint_requests`: `d5_signed_at`, `d5_signed_by_id`
+- [x] Campos pago en `maint_requests`: `payment_confirmed_at`, `payment_confirmed_by_id`
+- [x] Migración Alembic: `a1b2c3d4e5f6_extend_maint_flow.py`
+
+### ETAPA 3: Nuevos Endpoints de Transición — COMPLETADA ✅
+- [x] `approve_sm()`: ahora transiciona a `QUOTED_PENDING` (antes: directo a `AWAITING_PREREQUISITES`)
+- [x] `confirm_field_return()`: ahora transiciona a `PENDING_D5` (antes: `COMPLETED`)
+- [x] `POST /maintenance/requests/{id}/register-quotation` — QUOTED_PENDING → AWAITING_PREREQUISITES, guarda D2 (rol: purchasing/Admin)
+- [x] `POST /maintenance/requests/{id}/sign-d5` — PENDING_D5 → INVOICING_READY, guarda D5 (rol: maintenance_chief/Admin)
+- [x] `POST /maintenance/requests/{id}/register-invoice` — INVOICING_READY → PENDING_PAYMENT, validación RN8 de 5 documentos (rol: purchasing/Admin)
+- [x] `POST /maintenance/requests/{id}/confirm-payment` — PENDING_PAYMENT → CLOSED, actualiza equipo OPERATIVE (rol: finance/Admin)
+- [x] RN8: `register_invoice` valida presencia de D1(OC), D2, D3(proveedor), D4(transporte), D5 — error 422 con detalle si falta alguno
+
+### ETAPA 4: Tabla maint_documents + Upload/Download — COMPLETADA ✅
+- [x] Modelo `MaintDocument` (`app/models/maintenance/document.py`) — tipos D1–D7, archivo, mime, uploaded_by
+- [x] Relación `documents` en `MaintRequest`
+- [x] Migración Alembic: `b1c2d3e4f5a6_add_maint_documents.py`
+- [x] `POST /maintenance/requests/{id}/documents` — upload multipart/form-data (max 10MB, PDF/PNG/JPG/XLSX)
+- [x] `GET /maintenance/requests/{id}/documents` — lista documentos de la SM
+- [x] `GET /maintenance/documents/{doc_id}/download` — descarga con Content-Disposition
+
+### ETAPA 5: Frontend — COMPLETADA ✅
+- [x] `MaintRequestStatus` extendido con 5 nuevos estados en `types.ts`
+- [x] Campos D2/D5/payment añadidos a `MaintRequestResponse` en `types.ts`
+- [x] `sm-status-badge.tsx`: 5 nuevos estados con colores (QUOTED_PENDING=amarillo, PENDING_D5=naranja, INVOICING_READY=teal, PENDING_PAYMENT=azul, CLOSED=verde)
+- [x] `sm-actions.tsx`: 4 nuevas acciones (Registrar Cotización D2, Firmar D5, Registrar Factura, Confirmar Pago) con dialogs + validación de roles
+- [x] Guard de roles extendido: ahora incluye `purchasing` y `finance` en `ALL_MAINT_ROLES`
+- [x] 4 nuevas funciones API en `maintenance.ts`: `registerQuotation`, `signD5`, `registerInvoice`, `confirmPayment`
+- [x] 4 nuevos mutation hooks en `use-maintenance.ts`: `useRegisterQuotation`, `useSignD5`, `useRegisterInvoice`, `useConfirmPayment`
+- [x] Componente `document-list.tsx` — lista D1–D7 con badges, upload con clasificador de tipo, download
+- [x] Página detalle SM (`[id].tsx`): card "Flujo Comercial" (D2/D5/factura/pago) + `DocumentList`
+- [x] Schemas Pydantic `MaintRequestResponse` extendido con campos D2/D5/payment
+
+### ETAPA 6: Tests + Documentación — COMPLETADA ✅
+- [x] `tests/test_maintenance_commercial_flow.py` — 11 tests: flujo E2E completo cotización→D5→factura→pago
+- [x] Test RN8: factura falla sin D5 (estado incorrecto → 400) y sin OC (gate no pasa)
+- [x] Test documentos D1-D7: upload, list, download, tipo inválido (422)
+- [x] Test timeline: D2_QUOTATION_REGISTERED, D5_SIGNED, INVOICE_REGISTERED, PAYMENT_CONFIRMED
+- [x] Tests M1-M4 actualizados y pasando (7/7) — sin regresiones
+- [x] Bug fix: `download_router` separado para `/documents/{id}/download` (prefijo correcto)
+- **Resultado**: 18 tests totales, todos PASSED (11 flujo comercial + 7 M1-M4)
+
+### MEJORAS MÓDULO SOLICITUDES DE PEDIDO — COMPLETADO ✅
+
+#### Backend
+- [x] **Presupuesto no bloqueante**: `reserve_funds()` ya no lanza error si no hay presupuesto o si se excede el monto. Sigue registrando la reserva para referencia.
+- [x] **Campo `purchase_type`** en modelo `Request`: `INSUMOS` / `ACTIVOS_FIJOS` / `OTROS_SERVICIOS` (string, default `INSUMOS`)
+- [x] **Modelo `RequestDocument`** (`app/models/request_document.py`) — mismo patrón que `MaintDocument`
+- [x] **Migración** `c1d2e3f4a5b6_add_purchase_type_and_request_docs.py` (down_revision: `b1c2d3e4f5a6`)
+- [x] **3 endpoints de documentos** en `requests.py`:
+  - `POST /requests/{id}/documents` — upload multipart (max 10MB, PDF/Word/Excel)
+  - `GET /requests/{id}/documents` — lista documentos con uploader
+  - `GET /requests/documents/{doc_id}/download` — FileResponse con Content-Disposition
+- [x] **`download_router`** separado, montado en `/requests/documents` prefix (misma arquitectura que mantención)
+- [x] **Schema `RequestDocumentResponse`** + `documents: List[...]` en `RequestDetail`
+
+#### Frontend
+- [x] **Formulario nueva solicitud** (`request-form.tsx`) reestructurado en 4 secciones:
+  1. **Organización**: selector Empresa → CC filtrado por empresa (reset CC al cambiar empresa)
+  2. **Detalle**: título + tipo de compra con descripción + descripción
+  3. **Ítems**: sin cambios
+  4. **Documentos Adjuntos**: input file + lista con nombre/tamaño/botón eliminar, subida post-creación
+- [x] **Detalle solicitud** (`[id].tsx`): badge `purchase_type` en header, card "Documentos Adjuntos" con descarga e ícono por tipo (PDF/Excel/Word), botón upload para DRAFT del requester
+- [x] **Sidebar**: "Solicitudes" → "Solicitudes de Pedido", "Solicitudes SM" → "Solicitudes de Mantención"
+- [x] **`types.ts`**: `PurchaseType`, `RequestDocument`, `purchase_type` en `RequestCreate/Response/Detail`
+- [x] **`requests.ts`**: `getDocuments`, `uploadDocument`, `getDocumentDownloadUrl`
+- [x] **`use-requests.ts`**: `useRequestDocuments`, `useUploadRequestDocument`
+
+#### Equipment Code Auto-generation
+- [x] **Código de equipo auto-generado** en formato `{MARCA3}-{MODELO4}-{AÑO2}-{VIN4}` (ej: `CAT-336D-20-4X2A`)
+- [x] **Función `_generate_equipment_code()`** en `equipment.py` con cleanup regex
+- [x] **Colisiones resueltas** con sufijo `_2`, `_3`, etc.
+- [x] **Frontend** (`/equipos/nuevo`): campo código eliminado, banner informativo del formato
+
+### MÓDULO ADMIN PANEL + EQUIPMENT FLOW — COMPLETADO ✅
+
+#### Admin Panel CRUD
+- [x] **Usuarios** (`/admin/usuarios`) — tabla paginada, crear/editar/desactivar, selector de rol
+- [x] **Empresas** (`/admin/empresas`) — CRUD completo, validación RUT/tax_id único
+- [x] **Centros de Costo** (`/admin/centros-costo`) — CRUD con filtro por empresa
+- [x] **Matriz de Aprobación** (`/admin/matriz-aprobacion`) — reglas por empresa/CC/rol/monto, filtros
+- [x] **Backend completo**: `users.py`, `organizations.py`, `approval_matrix.py` con todos los endpoints CRUD
+- [x] **Frontend**: 4 páginas + `admin.ts` + `use-admin.ts` + sidebar admin con 5 links (Admin only)
+
+#### Equipment Flow (Crear y Registrar Equipos)
+- [x] **Seed data**: 10 equipos realistas en `scripts/seed_equipment.py` (idempotente) + `initial_data.py`
+- [x] **`/equipos/nuevo`** — formulario crear equipo (código, tipo, ficha técnica, empresa/CC, horómetro, PM interval)
+- [x] **`/equipos/:id`** — detalle con edición inline, historial horómetro, SMs recientes, acciones (actualizar horómetro, nueva SM)
+- [x] **Backend**: `GET /{id}/horometer-history` en equipment.py
+- [x] **Tipos y hooks**: `HorometerLogEntry`, `useHorometerHistory`, `useUpdateEquipment`
+
+### FASE M6: SLA Engine + Notificaciones (1 semana) — OPCIONAL/DIFERIBLE
+- [ ] **Background job** (APScheduler) — verifica SLAs cada hora:
+  - PENDING_APPROVAL > 16h → alerta a `maintenance_chief`
+  - Proveedor no confirma > 24h → alerta a `maintenance_planner`
+  - PENDING_RECEPTION > 8h → alerta a `maintenance_chief`
+  - Equipo < 10% intervalo restante → alerta a `maintenance_planner`
+- [ ] **Email templates** Jinja2
+- [ ] `app/services/maintenance/sla_service.py`
+- [ ] `app/api/api_v1/endpoints/maintenance/alerts.py`
+
+---
+
+### FASE 8: Notificaciones SGP (BAJA) — DIFERIDA
+- [ ] **Email notifications
+** al cambiar estado de solicitud de compra
 - [ ] **Notificaciones para aprobadores** (solicitudes pendientes)
-- [ ] **Configuración de canales** (email, SMS, webhook)
-- [ ] **Email template engine** (Jinja2)
+- [ ] **Email template engine** (Jinja2) — compartido con M6
 
 ### FASE 9: Validaciones & Business Logic (MEDIA)
 - [ ] **Validación: no duplicar solicitudes** en corto tiempo (< 5 min)
@@ -133,7 +344,7 @@
 - [x] **Layout responsive** con sidebar colapsable, toggle dark/light mode, user dropdown
 - [x] **Dockerizado** con multi-stage build (Node 20 + nginx) en puerto 3000
 - [x] **Proxy API** nginx redirige `/api/` → backend app:8000
-- [ ] **Admin panel** para CRUD (empresas, usuarios, matriz) - pendiente
+- [x] **Admin panel** CRUD completo — Usuarios, Empresas, Centros de Costo, Matriz de Aprobación
 - [ ] **Notificaciones en tiempo real** (WebSocket) - pendiente
 
 **Stack Frontend:**
@@ -315,10 +526,17 @@ frontend/src/lib/utils.ts / constants.ts / format.ts
 frontend/src/components/ui/ (button, card, input, label, badge, skeleton, separator, avatar, dropdown-menu, dialog, table, textarea, select, tooltip, sheet, tabs)
 frontend/src/components/layout/ (sidebar, header, app-layout)
 frontend/src/components/auth/protected-route.tsx
-frontend/src/components/dashboard/ (summary-cards, recent-requests, budget-usage-chart)
+frontend/src/components/dashboard/ (summary-cards, recent-requests, budget-usage-chart, status-distribution, pending-actions)
 frontend/src/components/requests/ (request-table, request-filters, request-status-badge, request-timeline, request-actions, request-form, request-item-row)
 frontend/src/components/shared/ (page-header, loading-skeleton, empty-state, confirm-dialog, pagination-controls)
-frontend/src/pages/ (login, dashboard, requests/index, requests/[id], requests/new)
+frontend/src/pages/ (login, dashboard, requests/index, requests/[id], requests/new, budgets, admin/audit)
+frontend/src/api/ (+dashboard.ts, +audit.ts)
+frontend/src/hooks/ (+use-dashboard.ts, +use-audit.ts)
+
+# Backend FASE 7 ──────────────────────
+app/schemas/dashboard.py                    ← NUEVO (dashboard consolidado)
+app/api/api_v1/endpoints/dashboard.py       ← NUEVO (GET /dashboard/summary)
+app/api/api_v1/endpoints/audit.py           ← NUEVO (GET /audit/logs, GET /audit/logs/export)
 ```
 
 ## Archivos Modificados

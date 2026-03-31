@@ -2,9 +2,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from app.models.request import Request, RequestStatus
+from app.models.request import Request, RequestItem, RequestStatus
 from app.models.workflow import ApprovalMatrix, WorkflowLog
 from app.models.users import User, Role
+from app.models.maintenance.request import MaintRequest
 
 
 # Map role names to the PENDING status that corresponds to their approval step
@@ -121,3 +122,44 @@ class WorkflowEngine:
         await self.db.commit()
         await self.db.refresh(request)
         return request
+
+    async def create_purchase_request_from_sm(
+        self,
+        sm: MaintRequest,
+        actor_id: str,
+        cost_center_id: str,
+    ) -> Request:
+        """
+        Creates an SGP Purchase Request from an approved Maintenance Request.
+        """
+        title = f"Mantención: {sm.equipment.name} ({sm.equipment.code})"
+        # Fallback to an estimated 1.0 if not provided
+        estimated_cost = sm.estimated_cost or 1.0
+        
+        # Create the purchase request
+        new_request = Request(
+            title=title,
+            description=sm.description,
+            requester_id=actor_id,
+            cost_center_id=cost_center_id,
+            total_amount=estimated_cost,
+            currency=sm.currency,
+            status=RequestStatus.DRAFT,
+            current_step=0,
+        )
+        self.db.add(new_request)
+        await self.db.flush()
+        
+        # Create the request item (we assume 1 service item)
+        item = RequestItem(
+            request_id=new_request.id,
+            description=f"Servicio de mantención {sm.maintenance_type.value} para equipo {sm.equipment.code}",
+            sku="SERV-MANT-01",
+            quantity=1.0,
+            unit_price=estimated_cost,
+            total_price=estimated_cost,
+        )
+        self.db.add(item)
+        await self.db.flush()
+        
+        return new_request

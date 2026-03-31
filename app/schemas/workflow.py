@@ -41,3 +41,10 @@ class ReceptionInput(BaseModel):
     """Input schema for reception confirmation."""
     is_partial: bool = False
     comment: Optional[str] = None
+
+
+# ── Audit Log schemas ──
+
+class AuditLogResponse(WorkflowLogResponse):
+    """Extended workflow log with request title for audit reports."""
+    request_title: Optional[str] = None

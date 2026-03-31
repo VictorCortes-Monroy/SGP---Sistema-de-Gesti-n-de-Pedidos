@@ -8,11 +8,22 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.core import security
-from app.models.users import User as UserModel
+from app.models.users import User as UserModel, Role
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter()
+
+
+@router.get("/roles")
+async def list_roles(
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(require_role("Admin")),
+):
+    """List all available roles. Admin only."""
+    result = await db.execute(select(Role).order_by(Role.name))
+    roles = result.scalars().all()
+    return [{"id": str(r.id), "name": r.name, "description": r.description} for r in roles]
 
 
 def _to_response(user: UserModel) -> dict:

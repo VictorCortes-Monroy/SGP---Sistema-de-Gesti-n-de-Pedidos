@@ -1,15 +1,17 @@
 from typing import Any, List, Optional
 from datetime import datetime, date
-from fastapi import APIRouter, Depends, HTTPException, Query, Request as FastAPIRequest
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request as FastAPIRequest, UploadFile, File
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
+import os
 
 from app.api import deps
 from app.api.deps import get_client_ip
 from app.models.users import User
 from app.models.request import Request, RequestItem, RequestStatus
+from app.models.request_document import RequestDocument
 from app.models.workflow import WorkflowLog
 from app.models.comment import Comment
 from app.schemas.request import (
@@ -29,6 +31,19 @@ from app.services.workflow import WorkflowEngine
 from app.services.budget_service import BudgetService
 
 router = APIRouter()
+download_router = APIRouter()
+
+UPLOAD_DIR = "uploads/request_docs"
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/png",
+    "image/jpeg",
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 async def _load_request(db: AsyncSession, request_id: str) -> Request:
@@ -46,12 +61,13 @@ async def _load_request(db: AsyncSession, request_id: str) -> Request:
 
 
 async def _load_request_with_logs(db: AsyncSession, request_id: str) -> Request:
-    """Helper to load a request with all relationships including logs."""
+    """Helper to load a request with all relationships including logs and documents."""
     query = select(Request).options(
         selectinload(Request.cost_center),
         selectinload(Request.items),
         selectinload(Request.requester),
         selectinload(Request.logs).selectinload(WorkflowLog.actor),
+        selectinload(Request.documents).selectinload(RequestDocument.uploaded_by),
     ).where(Request.id == request_id, Request.is_deleted == False)
     result = await db.execute(query)
     request = result.scalars().first()
@@ -177,10 +193,7 @@ async def submit_request(
         raise HTTPException(status_code=400, detail="Only DRAFT requests can be submitted")
 
     budget_service = BudgetService(db)
-    try:
-        await budget_service.reserve_funds(request)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    await budget_service.reserve_funds(request)
 
     wf_engine = WorkflowEngine(db)
     steps = await wf_engine.get_required_approvals(request)
@@ -660,3 +673,110 @@ async def list_comments(
         )
         for c in comments
     ]
+
+
+# ─── DOCUMENTS ───────────────────────────────────────────────────────────────
+
+@router.post("/{request_id}/documents", status_code=201)
+async def upload_request_document(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    request_id: str,
+    notes: str = Query(None),
+    file: UploadFile = File(...),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Upload a document attachment to a request."""
+    await _load_request(db, request_id)
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File exceeds maximum size of 10MB")
+
+    mime_type = file.content_type or "application/octet-stream"
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    timestamp = int(datetime.utcnow().timestamp())
+    safe_filename = f"{request_id}_{timestamp}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    doc = RequestDocument(
+        request_id=request_id,
+        file_name=file.filename,
+        file_path=file_path,
+        file_size=len(content),
+        mime_type=mime_type,
+        notes=notes,
+        uploaded_by_id=current_user.id,
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+
+    return {
+        "id": str(doc.id),
+        "request_id": str(doc.request_id),
+        "file_name": doc.file_name,
+        "file_size": doc.file_size,
+        "mime_type": doc.mime_type,
+        "uploaded_by_name": current_user.full_name,
+        "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+        "notes": doc.notes,
+    }
+
+
+@router.get("/{request_id}/documents")
+async def list_request_documents(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    request_id: str,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """List document attachments for a request."""
+    await _load_request(db, request_id)
+
+    result = await db.execute(
+        select(RequestDocument)
+        .options(selectinload(RequestDocument.uploaded_by))
+        .where(RequestDocument.request_id == request_id)
+        .order_by(RequestDocument.uploaded_at)
+    )
+    docs = result.scalars().all()
+    return [
+        {
+            "id": str(d.id),
+            "request_id": str(d.request_id),
+            "file_name": d.file_name,
+            "file_size": d.file_size,
+            "mime_type": d.mime_type,
+            "uploaded_by_name": d.uploaded_by.full_name if d.uploaded_by else None,
+            "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+            "notes": d.notes,
+        }
+        for d in docs
+    ]
+
+
+@download_router.get("/{doc_id}/download")
+async def download_request_document(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    doc_id: str,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Download a request document attachment."""
+    result = await db.execute(select(RequestDocument).where(RequestDocument.id == doc_id))
+    doc = result.scalars().first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not os.path.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="File not found on server")
+
+    return FileResponse(
+        path=doc.file_path,
+        filename=doc.file_name,
+        media_type=doc.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{doc.file_name}"'},
+    )

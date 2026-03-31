@@ -1,67 +1,54 @@
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { RequestStatusBadge } from '@/components/requests/request-status-badge'
-import { useRequests } from '@/hooks/use-requests'
 import { formatCurrency, formatDate } from '@/lib/format'
-import { TableSkeleton } from '@/components/shared/loading-skeleton'
 import { EmptyState } from '@/components/shared/empty-state'
 import { FileText } from 'lucide-react'
+import type { RecentRequestItem, RequestStatus } from '@/api/types'
 
-export function RecentRequests() {
-  const { data, isLoading } = useRequests({ limit: 5 })
+interface Props {
+  items: RecentRequestItem[]
+}
 
+export function RecentRequests({ items }: Props) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Solicitudes Recientes</CardTitle>
+        <CardTitle className="text-base">Solicitudes Recientes</CardTitle>
         <Link to="/solicitudes" className="text-sm text-primary hover:underline">
           Ver todas
         </Link>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
-          <TableSkeleton rows={5} />
-        ) : !data?.items?.length ? (
+        {!items.length ? (
           <EmptyState
             icon={FileText}
             title="Sin solicitudes"
             description="No hay solicitudes registradas aun"
           />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Titulo</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Monto</TableHead>
-                <TableHead>Fecha</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.items.map((req) => (
-                <TableRow key={req.id}>
-                  <TableCell>
-                    <Link
-                      to={`/solicitudes/${req.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {req.title}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <RequestStatusBadge status={req.status} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrency(req.total_amount)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(req.created_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="space-y-2">
+            {items.map((req) => (
+              <Link
+                key={req.id}
+                to={`/solicitudes/${req.id}`}
+                className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/50 transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{req.title}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <RequestStatusBadge status={req.status as RequestStatus} />
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(req.created_at)}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-sm font-medium ml-2 whitespace-nowrap">
+                  {formatCurrency(req.total_amount)}
+                </span>
+              </Link>
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>

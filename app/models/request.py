@@ -30,6 +30,7 @@ class Request(Base):
     total_amount = Column(Numeric(14, 2), default=0.0)
     currency = Column(String, default="USD")
     current_step = Column(Integer, default=0)
+    purchase_type = Column(String, nullable=True, default='INSUMOS')
     is_deleted = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -41,6 +42,7 @@ class Request(Base):
     items = relationship("RequestItem", back_populates="request", cascade="all, delete-orphan")
     logs = relationship("WorkflowLog", back_populates="request")
     comments = relationship("Comment", back_populates="request", cascade="all, delete-orphan")
+    documents = relationship("RequestDocument", back_populates="request", cascade="all, delete-orphan")
 
 class RequestItem(Base):
     __tablename__ = "request_items"

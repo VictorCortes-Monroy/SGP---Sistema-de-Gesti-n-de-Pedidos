@@ -1,19 +1,16 @@
 import { FileText, Clock, CheckCircle, DollarSign } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CardSkeleton } from '@/components/shared/loading-skeleton'
-import { useRequests } from '@/hooks/use-requests'
-import { useBudgets } from '@/hooks/use-budgets'
 import { formatCurrency } from '@/lib/format'
-import type { RequestResponse, BudgetResponse } from '@/api/types'
+import type { DashboardSummary } from '@/api/types'
 
-export function SummaryCards() {
-  const { data: requestsData, isLoading: loadingRequests } = useRequests({ limit: 1 })
-  const { data: pendingTech } = useRequests({ status: 'PENDING_TECHNICAL', limit: 1 })
-  const { data: pendingFin } = useRequests({ status: 'PENDING_FINANCIAL', limit: 1 })
-  const { data: approved } = useRequests({ status: 'APPROVED', limit: 1 })
-  const { data: budgetsData, isLoading: loadingBudgets } = useBudgets()
+interface Props {
+  data?: DashboardSummary
+  isLoading: boolean
+}
 
-  if (loadingRequests || loadingBudgets) {
+export function SummaryCards({ data, isLoading }: Props) {
+  if (isLoading || !data) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -23,33 +20,29 @@ export function SummaryCards() {
     )
   }
 
-  const pendingCount = (pendingTech?.total ?? 0) + (pendingFin?.total ?? 0)
-  const approvedCount = approved?.total ?? 0
-  const totalCount = requestsData?.total ?? 0
-
-  const budgets = (budgetsData as any)?.items ?? budgetsData ?? []
-  const totalAvailable = Array.isArray(budgets)
-    ? budgets.reduce((sum: number, b: BudgetResponse) => sum + b.available_amount, 0)
-    : 0
+  const pendingCount = (data.status_distribution['PENDING_TECHNICAL'] ?? 0)
+    + (data.status_distribution['PENDING_FINANCIAL'] ?? 0)
+  const approvedCount = data.status_distribution['APPROVED'] ?? 0
+  const totalAvailable = data.budget_summary.reduce((sum, b) => sum + b.available_amount, 0)
 
   const cards = [
     {
       title: 'Pendientes',
-      value: pendingCount,
+      value: String(pendingCount),
       description: 'Solicitudes por aprobar',
       icon: Clock,
       color: 'text-orange-600',
     },
     {
       title: 'Aprobadas',
-      value: approvedCount,
+      value: String(approvedCount),
       description: 'Solicitudes aprobadas',
       icon: CheckCircle,
       color: 'text-green-600',
     },
     {
       title: 'Total Solicitudes',
-      value: totalCount,
+      value: String(data.total_requests),
       description: 'Todas las solicitudes',
       icon: FileText,
       color: 'text-blue-600',

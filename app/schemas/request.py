@@ -25,10 +25,24 @@ class RequestItem(RequestItemBase):
     total_price: Decimal
 
 
+class RequestDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    request_id: UUID
+    file_name: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    uploaded_by_name: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
 class RequestBase(BaseModel):
     title: str
     description: Optional[str] = None
     cost_center_id: UUID
+    purchase_type: Optional[str] = 'INSUMOS'
 
 
 class RequestCreate(RequestBase):
@@ -54,5 +68,6 @@ class Request(RequestBase):
 
 
 class RequestDetail(Request):
-    """Extended request schema with audit trail."""
+    """Extended request schema with audit trail and documents."""
     logs: List[WorkflowLogResponse] = []
+    documents: List[RequestDocumentResponse] = []
