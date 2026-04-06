@@ -719,6 +719,21 @@ pytest.ini                                 ← +--cov flags
 scripts/initial_data.py
 ```
 
+### FASE 8: Documentación de Procedimientos e Instrucciones de Uso
+- [x] **docs/20_MANUAL_USUARIO.md** — Manual general del sistema: acceso, roles, módulos, dashboard, FAQ
+- [x] **docs/21_ROLES_Y_PERMISOS.md** — Definición detallada de 8 roles, capacidades, matriz de acceso por endpoint, reglas de visibilidad
+- [x] **docs/22_PROCEDIMIENTO_SOLICITUDES.md** — Procedimiento completo de solicitudes de compra: 6 pasos con entradas, proceso y salidas por cada uno
+- [x] **docs/23_PROCEDIMIENTO_MANTENCION.md** — Procedimiento completo de mantención: 9 pasos, documentos D1-D7, gate de control, SLAs, gestión de equipos y proveedores
+- [x] **docs/24_GUIA_ADMINISTRACION.md** — Guía de administración: usuarios, organizaciones, matriz de aprobación, auditoría, infraestructura, seguridad
+
+**Documentación generada cubre:**
+- Entradas (inputs), proceso y salidas (outputs) de cada operación
+- Roles: quién hace qué en cada paso
+- Ejemplos de peticiones y respuestas JSON
+- Diagramas de flujo en texto
+- Matrices de permisos por endpoint
+- Configuración de infraestructura y variables de entorno
+
 ## Test Users (seed data)
 | Email | Password | Rol |
 |-------|----------|-----|
