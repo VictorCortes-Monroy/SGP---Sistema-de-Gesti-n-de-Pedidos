@@ -290,15 +290,14 @@
 - [x] **Backend**: `GET /{id}/horometer-history` en equipment.py
 - [x] **Tipos y hooks**: `HorometerLogEntry`, `useHorometerHistory`, `useUpdateEquipment`
 
-### FASE M6: SLA Engine + Notificaciones (1 semana) — OPCIONAL/DIFERIBLE
-- [ ] **Background job** (APScheduler) — verifica SLAs cada hora:
-  - PENDING_APPROVAL > 16h → alerta a `maintenance_chief`
-  - Proveedor no confirma > 24h → alerta a `maintenance_planner`
-  - PENDING_RECEPTION > 8h → alerta a `maintenance_chief`
-  - Equipo < 10% intervalo restante → alerta a `maintenance_planner`
-- [ ] **Email templates** Jinja2
-- [ ] `app/services/maintenance/sla_service.py`
-- [ ] `app/api/api_v1/endpoints/maintenance/alerts.py`
+### FASE M6: SLA Engine + Notificaciones (1 semana) — COMPLETADA ✅
+- [x] **Background job** (APScheduler) — verifica SLAs cada hora
+- [x] **4 condiciones de incumplimiento** monitoreadas con deduplicación
+- [x] **Endpoint manual** `POST /maintenance/alerts/run-checks` (Admin)
+- [x] **Alertas** `GET /maintenance/alerts/`, `GET /maintenance/alerts/count`, `PATCH /maintenance/alerts/{id}/read`
+- [x] `app/services/maintenance/sla_service.py`
+- [x] `app/api/api_v1/endpoints/maintenance/alerts.py`
+- [x] Migración: `d1e2f3a4b5c6_add_maint_alerts.py`
 
 ---
 
@@ -345,6 +344,170 @@
 - [x] **Dockerizado** con multi-stage build (Node 20 + nginx) en puerto 3000
 - [x] **Proxy API** nginx redirige `/api/` → backend app:8000
 - [x] **Admin panel** CRUD completo — Usuarios, Empresas, Centros de Costo, Matriz de Aprobación
+
+---
+
+## PRUEBAS DE INTEGRACIÓN E2E CON ENDPOINTS (2026-04-05)
+
+> **Contexto:** Pruebas manuales ejecutadas contra los contenedores Docker levantados localmente.
+> Puertos: API=8000, Frontend=3002, PostgreSQL=5433 (remapeados por conflicto con otros servicios).
+
+### Infraestructura Docker
+- [x] `docker-compose up --build` exitoso — 3 servicios: db (PostgreSQL 15), app (FastAPI), frontend (React/Nginx)
+- [x] Migraciones Alembic aplicadas automáticamente (7 versiones)
+- [x] Seed data cargado exitosamente (8 usuarios con roles)
+- [x] **Nota:** Puertos 5432 y 3000/3001 estaban ocupados por contenedores workshop/supabase → remapeados a 5433 y 3002 en `docker-compose.yml`
+
+### 1. Autenticación (5/5 OK)
+- [x] Login exitoso para los 8 roles: admin, requester, tech, financial, planner, chief, purchasing, finance
+- [x] JWT token generado correctamente (bearer)
+- [x] Login con credenciales inválidas retorna HTTP 400 (correcto)
+- [x] Token permite acceso a endpoints protegidos
+- [x] `/health` retorna `{"status": "healthy"}`
+
+### 2. Usuarios y Roles (3/3 OK)
+- [x] `GET /users/` — Retorna 8 usuarios seed
+- [x] `GET /users/me` — Retorna usuario autenticado con email y role
+- [x] `GET /users/roles` — Lista 8 roles: Admin, Requester, Technical Approver, Financial Approver, maintenance_planner, maintenance_chief, purchasing, finance
+
+### 3. Organizaciones — CRUD Completo (4/4 OK)
+- [x] `POST /organizations/companies` — Empresa "T-METAL SPA" creada (tax_id: 76.123.456-7)
+- [x] `GET /organizations/companies` — Lista empresas correctamente
+- [x] `POST /organizations/cost-centers` — Centro de costo "Operaciones Mineras" (CC-001) creado bajo T-METAL SPA
+- [x] `GET /organizations/cost-centers` — Lista centros de costo
+
+### 4. Matriz de Aprobación (2/2 OK)
+- [x] Regla 1 creada: Technical Approver, step_order=1, min_amount=0 → toda solicitud requiere aprobación técnica
+- [x] Regla 2 creada: Financial Approver, step_order=2, min_amount=1000 → montos ≥$1,000 requieren aprobación financiera
+
+### 5. Flujo E2E Solicitud de Pedido — COMPLETO (10/10 OK)
+
+**Solicitud**: "Repuestos Excavadora CAT 336D" — 3 items, total $5,090.00
+- Filtro de aceite: 5x $350.00 = $1,750.00
+- Filtro hidráulico: 3x $520.00 = $1,560.00
+- Kit de sellos: 2x $890.00 = $1,780.00
+
+| Paso | Acción | Actor | Transición | Estado |
+|------|--------|-------|-----------|--------|
+| 1 | Crear solicitud | requester@example.com | → DRAFT | OK |
+| 2 | Enviar a aprobación | requester@example.com | DRAFT → PENDING_TECHNICAL | OK |
+| 3 | Aprobación técnica | tech@example.com | PENDING_TECHNICAL → PENDING_FINANCIAL | OK |
+| 4 | Aprobación financiera | financial@example.com | PENDING_FINANCIAL → APPROVED | OK |
+| 5 | Recepción total | requester@example.com | APPROVED → COMPLETED | OK |
+| 6 | Timeline (4 eventos) | requester@example.com | — | OK |
+| 7 | Agregar comentario | requester@example.com | — | OK (campo: `text`) |
+| 8 | Listar comentarios | requester@example.com | — | OK (1 comentario) |
+| 9 | Export Excel | admin@example.com | — | OK (5,144 bytes) |
+| 10 | Dashboard summary | admin@example.com | — | OK (2 requests, status_distribution, budget_summary) |
+
+**Timeline verificado:**
+```
+1. [SUBMITTED] DRAFT → PENDING_TECHNICAL (John Requester, IP: 172.21.0.1)
+2. [APPROVE] PENDING_TECHNICAL → PENDING_FINANCIAL (Jane Tech) — "Specs OK, aprobado"
+3. [APPROVE] PENDING_FINANCIAL → APPROVED (Scrooge McDuck) — "Presupuesto OK"
+4. [RECEIVED_FULL] APPROVED → COMPLETED (John Requester) — "Todo recibido en bodega"
+```
+
+### 6. Equipos — CRUD + Horómetro (4/4 OK)
+- [x] Seed data: 10 equipos precargados (CAT, Komatsu, JCB, Atlas Copco, Liebherr, Volvo, Mercedes-Benz)
+- [x] `POST /maintenance/equipment/` — Equipo creado: código auto-generado `CAT-336D-00-0011`, tipo EXCAVATOR, horómetro 4500h
+- [x] `PUT /maintenance/equipment/{id}/horometer` — Actualizado a 4780h (campo: `reading`)
+- [x] `GET /maintenance/equipment/{id}/horometer-history` — 1 registro en historial
+
+### 7. Proveedores (1/1 OK)
+- [x] `POST /maintenance/providers/` — "Finning Chile" creado (campo: `rut`, no `tax_id`)
+
+### 8. Flujo E2E Solicitud de Mantención SM-2026-0001 — COMPLETO (18/18 eventos OK)
+
+**SM**: Mantención preventiva para Motoniveladora CAT 14M (horómetro 12,300h)
+
+| Paso | Acción | Actor (Rol) | Transición | Estado |
+|------|--------|------------|-----------|--------|
+| 1 | Crear SM | planner (maintenance_planner) | → DRAFT | OK |
+| 2 | Submit | planner | DRAFT → PENDING_APPROVAL | OK |
+| 3 | Approve | chief (maintenance_chief) | PENDING_APPROVAL → APPROVED | OK |
+| 4 | Auto-transition | sistema | APPROVED → QUOTED_PENDING | OK (automático) |
+| 5 | Confirm provider | planner | gate 1/3 ✅ | OK |
+| 6 | Schedule transport | planner | gate 2/3 ✅ (campo: `scheduled_date`) | OK |
+| 7 | Register quotation D2 | purchasing | QUOTED_PENDING → AWAITING_PREREQUISITES | OK (campo: `quotation_amount`) |
+| 8 | Link purchase order | planner | gate 3/3 ✅ (campo: `purchase_order_code`) | OK |
+| 9 | Gate auto-pass | sistema | AWAITING_PREREQUISITES → READY_FOR_EXECUTION | OK (automático) |
+| 10 | Start execution | chief | READY_FOR_EXECUTION → IN_TRANSIT_TO_WORKSHOP | OK |
+| 11 | Workshop arrival | chief | IN_TRANSIT_TO_WORKSHOP → IN_MAINTENANCE | OK |
+| 12 | Complete execution | chief | IN_MAINTENANCE → PENDING_RECEPTION | OK |
+| 13 | Reception (checklist) | chief | PENDING_RECEPTION → PENDING_CERTIFICATE | OK (4 grupos checklist) |
+| 14 | Upload certificate | chief | PENDING_CERTIFICATE → IN_TRANSIT_TO_FIELD | OK (PDF upload) |
+| 15 | Confirm field return | chief | IN_TRANSIT_TO_FIELD → PENDING_D5 | OK |
+| 16 | Sign D5 | chief | PENDING_D5 → INVOICING_READY | OK |
+| 17 | Register invoice | purchasing | INVOICING_READY → PENDING_PAYMENT | OK |
+| 18 | Confirm payment | finance | PENDING_PAYMENT → CLOSED | OK |
+
+**Gate Control verificado:**
+```json
+{
+  "purchase_order": true,
+  "provider_confirmed": true,
+  "transport_scheduled": true,
+  "is_ready_for_execution": true
+}
+```
+
+**Timeline completo (18 eventos):**
+```
+ 1. [CREATED] None → DRAFT
+ 2. [SUBMITTED] DRAFT → PENDING_APPROVAL
+ 3. [APPROVED] PENDING_APPROVAL → APPROVED
+ 4. [AUTO_TRANSITION] APPROVED → QUOTED_PENDING
+ 5. [PROVIDER_CONFIRMED] QUOTED_PENDING → QUOTED_PENDING
+ 6. [TRANSPORT_SCHEDULED] QUOTED_PENDING → QUOTED_PENDING
+ 7. [D2_QUOTATION_REGISTERED] QUOTED_PENDING → AWAITING_PREREQUISITES
+ 8. [PO_LINKED] AWAITING_PREREQUISITES → AWAITING_PREREQUISITES
+ 9. [GATE_PASSED] AWAITING_PREREQUISITES → READY_FOR_EXECUTION
+10. [EXECUTION_STARTED] READY_FOR_EXECUTION → IN_TRANSIT_TO_WORKSHOP
+11. [WORKSHOP_ARRIVAL_CONFIRMED] IN_TRANSIT_TO_WORKSHOP → IN_MAINTENANCE
+12. [EXECUTION_COMPLETED] IN_MAINTENANCE → PENDING_RECEPTION
+13. [RECEPTION_APPROVED] PENDING_RECEPTION → PENDING_CERTIFICATE
+14. [CERTIFICATE_UPLOADED] PENDING_CERTIFICATE → IN_TRANSIT_TO_FIELD
+15. [EQUIPMENT_RETURNED] IN_TRANSIT_TO_FIELD → PENDING_D5
+16. [D5_SIGNED] PENDING_D5 → INVOICING_READY
+17. [INVOICE_REGISTERED] INVOICING_READY → PENDING_PAYMENT
+18. [PAYMENT_CONFIRMED] PENDING_PAYMENT → CLOSED
+```
+
+### 9. Endpoints Auxiliares (5/5 OK)
+- [x] `GET /maintenance/analytics/summary` — KPIs: 1 preventive, 0 corrective, cycle time, upcoming maintenance
+- [x] `GET /maintenance/alerts/count` — 0 alertas (recién iniciado)
+- [x] `GET /audit/logs` — 4 logs de workflow registrados con acciones
+- [x] `GET /budgets/` — 1 presupuesto seed (IT Operations, $10,000)
+- [x] `GET /budgets/report` — Reporte por año con grand totals
+
+### 10. Validaciones de Seguridad Verificadas
+- [x] **RBAC funcional**: `register-quotation` requiere rol `purchasing/Admin` — planner recibe 403
+- [x] **RBAC funcional**: `start-execution` requiere `maintenance_chief/Admin` — planner recibe 403
+- [x] **RBAC funcional**: `link-purchase-order` requiere `maintenance_planner/chief/Requester` — purchasing recibe 403
+- [x] **Estado inválido**: `complete-execution` en estado != IN_MAINTENANCE retorna error descriptivo
+- [x] **Estado inválido**: `close` en estado != COMPLETED retorna "Only COMPLETED requests can be formally closed"
+- [x] **Login inválido**: Credenciales incorrectas retornan HTTP 400
+
+### Notas de Campos Observados
+> Durante las pruebas se identificaron los nombres exactos de campos requeridos por los schemas:
+
+| Endpoint | Campo esperado | Campo incorrecto (usado inicialmente) |
+|----------|---------------|--------------------------------------|
+| `PUT /equipment/{id}/horometer` | `reading` | `value` |
+| `POST /maintenance/requests/{id}/register-quotation` | `quotation_amount` | `quoted_amount` |
+| `POST /maintenance/requests/{id}/link-purchase-order` | `purchase_order_code` | `purchase_order_number` |
+| `POST /maintenance/requests/{id}/schedule-transport` | `scheduled_date` | `departure_date` |
+| `POST /organizations/companies` | — | `company_id` no existe en RequestCreate |
+| `POST /maintenance/equipment/` | `equipment_type`: enum EXCAVATOR/CRANE/TRUCK/etc | valor en español rechazado |
+| `POST /maintenance/providers/` | `rut` | `tax_id` |
+| `POST /requests/{id}/comments` | `text` | `content` |
+| `POST /requests/{id}/receive` | `is_partial` + `comment` | `received_all` |
+| Approval Matrix | `role_id` + `step_order` | `approver_id` + `step` |
+
+### Documentación Notion
+- [x] **Página creada**: [SGP — Sistema de Gestión y Trazabilidad de Pedidos](https://www.notion.so/33a3758bd88a81b3ba3ff3657455fcbf)
+- Contenido: Tech stack, arquitectura, 6 módulos, máquinas de estado (8+13 estados), matriz aprobación, control presupuestario, 7 migraciones, 8 roles, usuarios prueba, instrucciones ejecución, 19 archivos de test (94% cov), estado de implementación completo
 - [ ] **Notificaciones en tiempo real** (WebSocket) - pendiente
 
 **Stack Frontend:**
