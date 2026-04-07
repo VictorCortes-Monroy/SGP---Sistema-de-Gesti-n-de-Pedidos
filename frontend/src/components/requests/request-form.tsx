@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Plus, Save, Send, Loader2, Paperclip, X, FileText } from 'lucide-react'
+import { Plus, Save, Send, Loader2, Paperclip, X, FileText, FileSpreadsheet, Image, Search } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,14 +15,16 @@ import { Badge } from '@/components/ui/badge'
 import { RequestItemRow } from './request-item-row'
 import { useCreateRequest, useSubmitRequest, useUploadRequestDocument } from '@/hooks/use-requests'
 import { useCompanies, useCostCenters } from '@/hooks/use-organizations'
+import { useCatalogItems } from '@/hooks/use-catalog'
 import { formatCurrency } from '@/lib/format'
-import type { PurchaseType } from '@/api/types'
+import type { PurchaseType, CatalogItem } from '@/api/types'
 
 const itemSchema = z.object({
   description: z.string().min(1, 'Descripcion requerida'),
   sku: z.string().optional().default(''),
   quantity: z.number().min(1, 'Minimo 1'),
   unit_price: z.number().min(0.01, 'Precio invalido'),
+  catalog_item_id: z.string().optional(),
 })
 
 const requestSchema = z.object({
@@ -35,13 +37,60 @@ const requestSchema = z.object({
 
 type RequestFormData = z.infer<typeof requestSchema>
 
-const emptyItem = { description: '', sku: '', quantity: 1, unit_price: 0 }
+const emptyItem = { description: '', sku: '', quantity: 1, unit_price: 0, catalog_item_id: undefined as string | undefined }
 
 const PURCHASE_TYPES: { value: PurchaseType; label: string; description: string }[] = [
   { value: 'INSUMOS', label: 'Insumos / Materiales', description: 'Consumibles, repuestos, materiales de operación' },
   { value: 'ACTIVOS_FIJOS', label: 'Activos Fijos', description: 'Maquinaria, equipos, mobiliario, infraestructura' },
   { value: 'OTROS_SERVICIOS', label: 'Otros Servicios', description: 'Servicios externos, consultorías, arriendos' },
 ]
+
+function CatalogSearchField({ onSelect }: { onSelect: (item: CatalogItem) => void }) {
+  const [text, setText] = useState('')
+  const [open, setOpen] = useState(false)
+  const { data: results = [] } = useCatalogItems(
+    text.trim().length >= 2 ? { search: text.trim(), limit: 8, is_active: true } : undefined
+  )
+
+  const handleBlur = () => setTimeout(() => setOpen(false), 150)
+
+  return (
+    <div className="relative col-span-12 mb-1">
+      <div className="flex items-center gap-1.5">
+        <Search className="h-3 w-3 text-muted-foreground shrink-0" />
+        <Input
+          placeholder="Buscar en catálogo por nombre o SKU (opcional)..."
+          className="h-7 text-xs border-dashed"
+          value={text}
+          onChange={(e) => { setText(e.target.value); setOpen(true) }}
+          onFocus={() => text.trim().length >= 2 && setOpen(true)}
+          onBlur={handleBlur}
+        />
+        {text && (
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0"
+            onClick={() => { setText(''); setOpen(false) }}>
+            <X className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+      {open && results.length > 0 && (
+        <div className="absolute top-8 left-4 right-0 z-50 bg-white dark:bg-zinc-950 border rounded-md shadow-lg max-h-48 overflow-y-auto">
+          {results.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="w-full text-left px-3 py-2 text-xs hover:bg-accent flex items-center justify-between gap-2"
+              onMouseDown={() => { onSelect(item); setText(''); setOpen(false) }}
+            >
+              <span className="font-medium truncate">{item.name}</span>
+              <span className="text-muted-foreground shrink-0 font-mono">{item.sku}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -80,7 +129,7 @@ export function RequestForm() {
       description: '',
       cost_center_id: '',
       purchase_type: 'INSUMOS',
-      items: [{ ...emptyItem }],
+      items: [{ description: '', sku: '', quantity: 1, unit_price: 0 }],
     },
   })
 
@@ -127,6 +176,7 @@ export function RequestForm() {
           sku: item.sku || undefined,
           quantity: item.quantity,
           unit_price: item.unit_price,
+          catalog_item_id: item.catalog_item_id || undefined,
         })),
       })
 
@@ -270,15 +320,27 @@ export function RequestForm() {
           </div>
 
           {items.map((item, idx) => (
-            <RequestItemRow
-              key={idx}
-              index={idx}
-              item={item}
-              onChange={updateItem}
-              onRemove={removeItem}
-              canRemove={items.length > 1}
-              errors={(errors.items as any)?.[idx]}
-            />
+            <div key={idx} className="grid grid-cols-12 gap-2">
+              <CatalogSearchField
+                onSelect={(catalogItem) => {
+                  updateItem(idx, 'description', catalogItem.name)
+                  updateItem(idx, 'sku', catalogItem.sku)
+                  if (catalogItem.reference_price) updateItem(idx, 'unit_price', catalogItem.reference_price)
+                  updateItem(idx, 'catalog_item_id', catalogItem.id)
+                }}
+              />
+              <div className="col-span-12">
+                <RequestItemRow
+                  index={idx}
+                  item={item}
+                  onChange={updateItem}
+                  onRemove={removeItem}
+                  canRemove={items.length > 1}
+                  errors={(errors.items as any)?.[idx]}
+                />
+              </div>
+              {idx < items.length - 1 && <div className="col-span-12"><Separator /></div>}
+            </div>
           ))}
 
           {errors.items && typeof errors.items.message === 'string' && (
@@ -300,15 +362,15 @@ export function RequestForm() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Adjunta cotizaciones, especificaciones técnicas u otros documentos relevantes.
-            Formatos permitidos: PDF, Word, Excel. Máximo 10 MB por archivo.
+            Adjunta cotizaciones, planos, fotografías u otros documentos relevantes.
+            Formatos: PDF, Word, Excel, imágenes (JPG, PNG, GIF, WebP). Máximo 10 MB por archivo.
           </p>
 
           <div>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.doc,.docx,.xls,.xlsx"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.bmp"
               multiple
               className="hidden"
               onChange={handleFileChange}
@@ -332,7 +394,15 @@ export function RequestForm() {
                   className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    {file.type.startsWith('image/') ? (
+                      <Image className="h-4 w-4 shrink-0 text-purple-500" />
+                    ) : file.type.includes('pdf') ? (
+                      <FileText className="h-4 w-4 shrink-0 text-red-500" />
+                    ) : file.type.includes('sheet') || file.type.includes('excel') ? (
+                      <FileSpreadsheet className="h-4 w-4 shrink-0 text-green-600" />
+                    ) : (
+                      <FileText className="h-4 w-4 shrink-0 text-blue-500" />
+                    )}
                     <span className="truncate">{file.name}</span>
                     <Badge variant="secondary" className="shrink-0 text-xs">
                       {formatFileSize(file.size)}

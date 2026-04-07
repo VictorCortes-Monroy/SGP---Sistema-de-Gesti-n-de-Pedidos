@@ -12,6 +12,7 @@ class RequestItemBase(BaseModel):
     sku: Optional[str] = None
     quantity: Decimal
     unit_price: Decimal
+    catalog_item_id: Optional[UUID] = None
 
 
 class RequestItemCreate(RequestItemBase):
@@ -58,6 +59,8 @@ class Request(RequestBase):
 
     id: UUID
     requester_id: UUID
+    requester_name: Optional[str] = None
+    cost_center_name: Optional[str] = None
     status: RequestStatus
     total_amount: Decimal
     currency: str

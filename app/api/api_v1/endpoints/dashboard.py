@@ -48,6 +48,8 @@ async def dashboard_summary(
         pending_statuses = [RequestStatus.PENDING_TECHNICAL]
     elif role_name == "Financial Approver":
         pending_statuses = [RequestStatus.PENDING_FINANCIAL]
+    elif role_name == "Purchasing":
+        pending_statuses = [RequestStatus.APPROVED, RequestStatus.PURCHASING]
     elif role_name == "Requester":
         pending_statuses = [RequestStatus.DRAFT, RequestStatus.REJECTED]
 

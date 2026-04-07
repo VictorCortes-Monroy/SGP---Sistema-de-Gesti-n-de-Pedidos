@@ -22,6 +22,12 @@ import MaintenanceRequestsPage from '@/pages/maintenance/requests/index'
 import NewMaintenanceRequestPage from '@/pages/maintenance/requests/new'
 import MaintenanceRequestDetailPage from '@/pages/maintenance/requests/[id]'
 import MaintenanceAlertsPage from '@/pages/maintenance/alerts'
+import CatalogPage from '@/pages/catalog/index'
+import NewCatalogItemPage from '@/pages/catalog/new'
+import CatalogItemDetailPage from '@/pages/catalog/[id]'
+import SuppliersPage from '@/pages/suppliers/index'
+import NewSupplierPage from '@/pages/suppliers/new'
+import SupplierDetailPage from '@/pages/suppliers/[id]'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,6 +68,14 @@ export default function App() {
               <Route path="/mantencion/solicitudes/nueva" element={<NewMaintenanceRequestPage />} />
               <Route path="/mantencion/solicitudes/:id" element={<MaintenanceRequestDetailPage />} />
               <Route path="/mantencion/alertas" element={<MaintenanceAlertsPage />} />
+
+              {/* Catalog & Suppliers module */}
+              <Route path="/insumos" element={<CatalogPage />} />
+              <Route path="/insumos/nuevo" element={<NewCatalogItemPage />} />
+              <Route path="/insumos/:id" element={<CatalogItemDetailPage />} />
+              <Route path="/proveedores" element={<SuppliersPage />} />
+              <Route path="/proveedores/nuevo" element={<NewSupplierPage />} />
+              <Route path="/proveedores/:id" element={<SupplierDetailPage />} />
             </Route>
           </Route>
 

@@ -101,6 +101,21 @@ export function useCancelRequest() {
   })
 }
 
+export function usePurchaseRequest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => requestsApi.purchase(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['requests'] })
+      qc.invalidateQueries({ queryKey: ['request', id] })
+      toast.success('Solicitud marcada como En Compra')
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'Error al iniciar compra')
+    },
+  })
+}
+
 export function useReceiveRequest() {
   const qc = useQueryClient()
   return useMutation({

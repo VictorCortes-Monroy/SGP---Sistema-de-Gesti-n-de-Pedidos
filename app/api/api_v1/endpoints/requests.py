@@ -96,6 +96,18 @@ def _build_role_filter(query, current_user: User):
                 Request.status == RequestStatus.PENDING_FINANCIAL,
             )
         )
+    elif role_name == "Purchasing":
+        query = query.where(
+            or_(
+                Request.requester_id == current_user.id,
+                Request.status.in_([
+                    RequestStatus.APPROVED,
+                    RequestStatus.PURCHASING,
+                    RequestStatus.RECEIVED_PARTIAL,
+                    RequestStatus.RECEIVED_FULL,
+                ]),
+            )
+        )
     else:
         query = query.where(Request.requester_id == current_user.id)
 
@@ -199,7 +211,9 @@ async def submit_request(
     steps = await wf_engine.get_required_approvals(request)
 
     if not steps:
-        new_status = RequestStatus.APPROVED
+        # No approval rules configured for this company/cost center.
+        # Fail-safe: require Technical Approver rather than auto-approving.
+        new_status = RequestStatus.PENDING_TECHNICAL
     else:
         new_status = await wf_engine.determine_status_for_step(steps, 0)
 
@@ -332,6 +346,7 @@ async def list_requests(
     query = select(Request).options(
         selectinload(Request.items),
         selectinload(Request.cost_center),
+        selectinload(Request.requester),
     ).where(base_where)
     query = _build_role_filter(query, current_user)
     query = _apply_filters(
@@ -481,6 +496,17 @@ async def get_request_timeline(
         total_steps=len(steps),
         next_approver_role=next_role.name if next_role else None,
         logs=enriched_logs,
+    )
+
+
+# ─── PURCHASE (APPROVED → PURCHASING) ────────────────────────────────────────
+
+@router.post("/{request_id}/purchase", deprecated=True)
+async def start_purchasing_deprecated(*args, **kwargs) -> Any:
+    """Deprecated: usar POST /api/v1/purchase-orders/ para crear una OC e iniciar la compra."""
+    raise HTTPException(
+        status_code=410,
+        detail="Este endpoint fue reemplazado. Usa POST /api/v1/purchase-orders/ para crear la Orden de Compra.",
     )
 
 

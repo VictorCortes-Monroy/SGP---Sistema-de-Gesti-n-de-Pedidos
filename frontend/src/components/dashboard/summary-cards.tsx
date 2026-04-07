@@ -2,6 +2,8 @@ import { FileText, Clock, CheckCircle, DollarSign } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CardSkeleton } from '@/components/shared/loading-skeleton'
 import { formatCurrency } from '@/lib/format'
+import { canSeeFinancials } from '@/lib/constants'
+import { useAuthStore } from '@/stores/auth-store'
 import type { DashboardSummary } from '@/api/types'
 
 interface Props {
@@ -10,10 +12,15 @@ interface Props {
 }
 
 export function SummaryCards({ data, isLoading }: Props) {
+  const roleName = useAuthStore((s) => s.user?.role_name)
+  const showFinancials = canSeeFinancials(roleName)
+
+  const skeletonCount = showFinancials ? 4 : 3
+
   if (isLoading || !data) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-${skeletonCount}`}>
+        {Array.from({ length: skeletonCount }).map((_, i) => (
           <CardSkeleton key={i} />
         ))}
       </div>
@@ -47,17 +54,17 @@ export function SummaryCards({ data, isLoading }: Props) {
       icon: FileText,
       color: 'text-blue-600',
     },
-    {
+    ...(showFinancials ? [{
       title: 'Presupuesto Disponible',
       value: formatCurrency(totalAvailable),
       description: 'Fondos disponibles',
       icon: DollarSign,
       color: 'text-emerald-600',
-    },
+    }] : []),
   ]
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-${cards.length}`}>
       {cards.map((card) => (
         <Card key={card.title}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">

@@ -27,8 +27,8 @@ async def seed_data(db: AsyncSession):
     role_fin_approver = Role(name="Financial Approver", description="Validates money")
     role_maint_planner = Role(name="maintenance_planner", description="Maintenance Planner")
     role_maint_chief = Role(name="maintenance_chief", description="Maintenance Chief")
-    role_purchasing = Role(name="purchasing", description="Abastecimiento - Genera OC y valida facturas")
-    role_finance = Role(name="finance", description="Finanzas - Aprueba pagos")
+    role_purchasing = Role(name="Purchasing", description="Abastecimiento - Genera OC y valida facturas")
+    role_finance = Role(name="Finance", description="Finanzas - Aprueba pagos")
 
     db.add_all([role_admin, role_requester, role_tech_approver, role_fin_approver, role_maint_planner, role_maint_chief, role_purchasing, role_finance])
     await db.commit()
@@ -105,20 +105,21 @@ async def seed_data(db: AsyncSession):
     )
     db.add_all([u_admin, u_req, u_tech, u_fin, u_maint_planner, u_maint_chief, u_purchasing, u_finance])
     
-    # 5. Create Approval Matrix
-    # Rule 1: All requests need Technical Approval
+    # 5. Create Approval Matrix — global rules (company_id=None, cost_center_id=None
+    #    means "applies to all companies and cost centers")
+    # Rule 1: All requests (any amount) require Technical Approval (step 1)
     rule1 = ApprovalMatrix(
-        company_id=company.id,
-        cost_center_id=cc.id,
+        company_id=None,
+        cost_center_id=None,
         min_amount=0,
         max_amount=None,
         role_id=role_tech_approver.id,
         step_order=1
     )
-    # Rule 2: Requests > 1000 need Financial Approval (Step 2)
+    # Rule 2: Requests >= $1,000 also require Financial Approval (step 2)
     rule2 = ApprovalMatrix(
-        company_id=company.id,
-        cost_center_id=cc.id,
+        company_id=None,
+        cost_center_id=None,
         min_amount=1000,
         max_amount=None,
         role_id=role_fin_approver.id,

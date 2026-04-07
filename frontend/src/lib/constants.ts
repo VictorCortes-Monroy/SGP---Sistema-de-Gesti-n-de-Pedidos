@@ -16,6 +16,11 @@ export const STATUS_OPTIONS = Object.entries(STATUS_CONFIG).map(([value, { label
   label,
 }))
 
+// Roles that can see monetary/financial information
+const FINANCIAL_ROLES = new Set(['Admin', 'Financial Approver', 'Technical Approver', 'Finance', 'Purchasing'])
+export const canSeeFinancials = (roleName: string | null | undefined): boolean =>
+  FINANCIAL_ROLES.has(roleName ?? '')
+
 export const ROLE_LABELS: Record<string, string> = {
   'Admin': 'Administrador',
   'Requester': 'Solicitante',

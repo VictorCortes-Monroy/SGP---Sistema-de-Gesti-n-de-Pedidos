@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { RequestStatusBadge } from '@/components/requests/request-status-badge'
 import { formatCurrency, formatDate } from '@/lib/format'
+import { canSeeFinancials } from '@/lib/constants'
+import { useAuthStore } from '@/stores/auth-store'
 import { EmptyState } from '@/components/shared/empty-state'
 import { FileText } from 'lucide-react'
 import type { RecentRequestItem, RequestStatus } from '@/api/types'
@@ -11,6 +13,9 @@ interface Props {
 }
 
 export function RecentRequests({ items }: Props) {
+  const roleName = useAuthStore((s) => s.user?.role_name)
+  const showFinancials = canSeeFinancials(roleName)
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -43,9 +48,11 @@ export function RecentRequests({ items }: Props) {
                     </span>
                   </div>
                 </div>
-                <span className="text-sm font-medium ml-2 whitespace-nowrap">
-                  {formatCurrency(req.total_amount)}
-                </span>
+                {showFinancials && (
+                  <span className="text-sm font-medium ml-2 whitespace-nowrap">
+                    {formatCurrency(req.total_amount)}
+                  </span>
+                )}
               </Link>
             ))}
           </div>

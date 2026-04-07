@@ -56,6 +56,11 @@ export const requestsApi = {
     return data
   },
 
+  purchase: async (id: string): Promise<RequestResponse> => {
+    const { data } = await apiClient.post(`/requests/${id}/purchase`)
+    return data
+  },
+
   receive: async (id: string, input: ReceptionInput): Promise<RequestResponse> => {
     const { data } = await apiClient.post(`/requests/${id}/receive`, input)
     return data

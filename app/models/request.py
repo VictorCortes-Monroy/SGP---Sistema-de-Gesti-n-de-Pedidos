@@ -43,16 +43,29 @@ class Request(Base):
     logs = relationship("WorkflowLog", back_populates="request")
     comments = relationship("Comment", back_populates="request", cascade="all, delete-orphan")
     documents = relationship("RequestDocument", back_populates="request", cascade="all, delete-orphan")
+    purchase_orders = relationship("PurchaseOrder", back_populates="request")
+    quotations = relationship("Quotation", back_populates="request")
+
+    @property
+    def cost_center_name(self):
+        return self.cost_center.name if self.cost_center else None
+
+    @property
+    def requester_name(self):
+        return self.requester.full_name if self.requester else None
 
 class RequestItem(Base):
     __tablename__ = "request_items"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     request_id = Column(UUID(as_uuid=True), ForeignKey("requests.id"))
+    catalog_item_id = Column(UUID(as_uuid=True), ForeignKey("catalog_items.id", ondelete="SET NULL"), nullable=True)
     description = Column(String, nullable=False)
     sku = Column(String, nullable=True)
     quantity = Column(Numeric(10, 2), nullable=False)
     unit_price = Column(Numeric(14, 2), nullable=False)
     total_price = Column(Numeric(14, 2), nullable=False)
-    
+
     request = relationship("Request", back_populates="items")
+    catalog_item = relationship("CatalogItem", back_populates="request_items")
+    purchase_order_items = relationship("PurchaseOrderItem", back_populates="request_item")

@@ -3,6 +3,8 @@ import { AlertCircle, ArrowRight, CheckCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { canSeeFinancials } from '@/lib/constants'
+import { useAuthStore } from '@/stores/auth-store'
 import { STATUS_CONFIG } from '@/lib/constants'
 import { formatCurrency, formatDate } from '@/lib/format'
 import type { PendingActionItem } from '@/api/types'
@@ -12,6 +14,9 @@ interface Props {
 }
 
 export function PendingActions({ items }: Props) {
+  const roleName = useAuthStore((s) => s.user?.role_name)
+  const showFinancials = canSeeFinancials(roleName)
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -48,9 +53,11 @@ export function PendingActions({ items }: Props) {
                       <Badge variant="secondary" className={statusConfig?.color || ''}>
                         {statusConfig?.label || item.status}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {formatCurrency(item.total_amount)}
-                      </span>
+                      {showFinancials && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatCurrency(item.total_amount)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground ml-2 flex-shrink-0" />

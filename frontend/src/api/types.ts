@@ -539,3 +539,203 @@ export interface MaintAlert {
   created_at: string
   resolved_at: string | null
 }
+
+// ── Catálogo e Inventario ──
+export type SupplierCategory = 'INSUMOS' | 'ACTIVOS_FIJOS' | 'SERVICIOS' | 'MIXTO'
+export type UnitOfMeasure = 'UN' | 'KG' | 'LT' | 'MT' | 'HR' | 'GL' | 'M2' | 'M3' | 'TN' | 'PZ'
+
+export interface Supplier {
+  id: string
+  name: string
+  rut: string | null
+  contact_name: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  address: string | null
+  category: SupplierCategory
+  payment_terms_days: number | null
+  delivery_days: number | null
+  rating: number | null
+  is_active: boolean
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SupplierDetail extends Supplier {
+  products: SupplierProduct[]
+  total_spend: number
+  purchase_count: number
+}
+
+export interface CatalogItem {
+  id: string
+  sku: string
+  name: string
+  description: string | null
+  category: PurchaseType
+  unit_of_measure: UnitOfMeasure
+  reference_price: number | null
+  currency: string
+  preferred_supplier_id: string | null
+  preferred_supplier_name: string | null
+  technical_specs: Record<string, string> | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CatalogItemDetail extends CatalogItem {
+  suppliers: SupplierProduct[]
+  purchase_history: PurchaseHistoryEntry[]
+}
+
+export interface SupplierProduct {
+  id: string
+  supplier_id: string
+  catalog_item_id: string
+  supplier_sku: string | null
+  unit_price: number | null
+  currency: string
+  lead_time_days: number | null
+  is_preferred: boolean
+  last_purchase_date: string | null
+  updated_at: string
+  supplier_name?: string | null
+  catalog_item_name?: string | null
+}
+
+export interface PurchaseHistoryEntry {
+  request_id: string
+  request_title: string
+  quantity: number
+  unit_price: number
+  total_price: number
+  purchased_at: string
+  status: string
+}
+
+export interface TopProductEntry {
+  catalog_item_id: string
+  sku: string
+  name: string
+  category: string
+  total_quantity: number
+  total_spend: number
+  purchase_count: number
+}
+
+export interface SupplierSpendEntry {
+  supplier_id: string
+  supplier_name: string
+  total_spend: number
+  purchase_count: number
+  last_purchase_date: string | null
+}
+
+// ── Purchase Orders ──────────────────────────────────────────────────────────
+
+export type POStatus =
+  | 'DRAFT' | 'SENT' | 'RECEIVED_PARTIAL' | 'RECEIVED_FULL'
+  | 'CLOSED' | 'CANCELLED'
+
+export type QuotationStatus = 'RECEIVED' | 'SELECTED' | 'REJECTED'
+
+export interface PurchaseOrderItemResponse {
+  id: string
+  purchase_order_id: string
+  request_item_id: string | null
+  catalog_item_id: string | null
+  description: string
+  supplier_sku: string | null
+  quantity_ordered: number
+  unit_price: number
+  total_price: number
+  quantity_received: number
+}
+
+export interface PurchaseOrderResponse {
+  id: string
+  request_id: string
+  supplier_id: string
+  supplier_name: string | null
+  quotation_id: string | null
+  oc_number: string
+  status: POStatus
+  total_amount: number
+  currency: string
+  expected_delivery_date: string | null
+  payment_terms_days: number | null
+  payment_terms_text: string | null
+  notes: string | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+  items: PurchaseOrderItemResponse[]
+}
+
+export interface PurchaseOrderList extends Omit<PurchaseOrderResponse, 'items'> {}
+
+export interface PurchaseOrderItemCreate {
+  request_item_id?: string
+  catalog_item_id?: string
+  description: string
+  supplier_sku?: string
+  quantity_ordered: number
+  unit_price: number
+}
+
+export interface PurchaseOrderCreate {
+  request_id: string
+  supplier_id: string
+  quotation_id?: string
+  currency?: string
+  expected_delivery_date?: string
+  payment_terms_days?: number
+  payment_terms_text?: string
+  notes?: string
+  items: PurchaseOrderItemCreate[]
+}
+
+export interface POReceptionInput {
+  items: { purchase_order_item_id: string; quantity_received: number }[]
+  notes?: string
+}
+
+export interface QuotationItemResponse {
+  id: string
+  quotation_id: string
+  description: string
+  quantity: number
+  unit_price: number
+  total_price: number
+}
+
+export interface QuotationResponse {
+  id: string
+  request_id: string
+  supplier_id: string
+  supplier_name: string | null
+  quote_reference: string | null
+  status: QuotationStatus
+  total_amount: number | null
+  currency: string
+  valid_until: string | null
+  notes: string | null
+  rejection_reason: string | null
+  created_by_id: string
+  created_at: string
+  updated_at: string
+  items: QuotationItemResponse[]
+}
+
+export interface QuotationCreate {
+  request_id: string
+  supplier_id: string
+  quote_reference?: string
+  total_amount?: number
+  currency?: string
+  valid_until?: string
+  notes?: string
+  items: { description: string; quantity: number; unit_price: number }[]
+}

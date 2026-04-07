@@ -14,6 +14,8 @@ import {
   HardHat,
   Truck,
   Bell,
+  Package,
+  Store,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -41,6 +43,11 @@ const maintNav: NavItem[] = [
   { label: 'Equipos', href: '/equipos', icon: Truck },
   { label: 'Solicitudes de Mantención', href: '/mantencion/solicitudes', icon: HardHat },
   { label: 'Alertas SLA', href: '/mantencion/alertas', icon: Bell },
+]
+
+const acquisitionsNav: NavItem[] = [
+  { label: 'Catálogo de Insumos', href: '/insumos', icon: Package },
+  { label: 'Proveedores', href: '/proveedores', icon: Store },
 ]
 
 const adminNav: NavItem[] = [
@@ -125,6 +132,24 @@ export function Sidebar() {
               ))}
             </>
           )}
+
+          {/* Acquisitions section — visible to all authenticated users */}
+          <>
+            <Separator className="my-3" />
+            <div className={cn('px-2 py-1', collapsed && 'sr-only')}>
+              <span className="text-xs font-semibold uppercase text-muted-foreground">
+                Adquisiciones
+              </span>
+            </div>
+            {acquisitionsNav.map((item) => (
+              <SidebarLink
+                key={item.href}
+                item={item}
+                active={location.pathname.startsWith(item.href)}
+                collapsed={collapsed}
+              />
+            ))}
+          </>
 
           {isAdmin && (
             <>

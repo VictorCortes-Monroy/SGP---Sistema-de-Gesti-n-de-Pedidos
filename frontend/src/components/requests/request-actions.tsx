@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Send, CheckCircle, XCircle, Ban, Package } from 'lucide-react'
+import { Send, CheckCircle, XCircle, Ban, ShoppingCart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,31 +8,30 @@ import {
   useApproveRequest,
   useRejectRequest,
   useCancelRequest,
-  useReceiveRequest,
 } from '@/hooks/use-requests'
 import { useAuthStore } from '@/stores/auth-store'
+import { PurchaseOrderForm } from './purchase-order-form'
 import type { RequestDetail } from '@/api/types'
 
 interface RequestActionsProps {
   request: RequestDetail
 }
 
-type DialogType = 'submit' | 'approve' | 'reject' | 'cancel' | 'receive' | null
+type DialogType = 'submit' | 'approve' | 'reject' | 'cancel' | null
 
 export function RequestActions({ request }: RequestActionsProps) {
   const [dialog, setDialog] = useState<DialogType>(null)
+  const [poFormOpen, setPoFormOpen] = useState(false)
   const user = useAuthStore((s) => s.user)
 
   const submit = useSubmitRequest()
   const approve = useApproveRequest()
   const reject = useRejectRequest()
   const cancel = useCancelRequest()
-  const receive = useReceiveRequest()
 
   const status = request.status
   const roleName = user?.role_name
 
-  // Determine which actions are available
   const canSubmit = status === 'DRAFT' && (roleName === 'Admin' || user?.id === request.requester_id)
   const canApprove =
     (status === 'PENDING_TECHNICAL' && (roleName === 'Technical Approver' || roleName === 'Admin')) ||
@@ -41,9 +40,9 @@ export function RequestActions({ request }: RequestActionsProps) {
   const canCancel =
     ['DRAFT', 'PENDING_TECHNICAL', 'PENDING_FINANCIAL'].includes(status) &&
     (roleName === 'Admin' || user?.id === request.requester_id)
-  const canReceive = status === 'PURCHASING' && (roleName === 'Admin' || roleName === 'Requester')
+  const canPurchase = status === 'APPROVED' && (roleName === 'Admin' || roleName === 'Purchasing')
 
-  const hasActions = canSubmit || canApprove || canReject || canCancel || canReceive
+  const hasActions = canSubmit || canApprove || canReject || canCancel || canPurchase
 
   if (!hasActions) return null
 
@@ -61,17 +60,10 @@ export function RequestActions({ request }: RequestActionsProps) {
       case 'cancel':
         cancel.mutate({ id: request.id, comment }, { onSuccess: () => setDialog(null) })
         break
-      case 'receive':
-        receive.mutate(
-          { id: request.id, input: { is_partial: false, comment } },
-          { onSuccess: () => setDialog(null) }
-        )
-        break
     }
   }
 
-  const isLoading =
-    submit.isPending || approve.isPending || reject.isPending || cancel.isPending || receive.isPending
+  const isLoading = submit.isPending || approve.isPending || reject.isPending || cancel.isPending
 
   return (
     <>
@@ -98,10 +90,10 @@ export function RequestActions({ request }: RequestActionsProps) {
               Rechazar
             </Button>
           )}
-          {canReceive && (
-            <Button onClick={() => setDialog('receive')} className="w-full" variant="secondary">
-              <Package className="mr-2 h-4 w-4" />
-              Registrar Recepcion
+          {canPurchase && (
+            <Button onClick={() => setPoFormOpen(true)} className="w-full" variant="default">
+              <ShoppingCart className="mr-2 h-4 w-4" />
+              Iniciar Compra
             </Button>
           )}
           {canCancel && (
@@ -166,17 +158,11 @@ export function RequestActions({ request }: RequestActionsProps) {
         loading={isLoading}
       />
 
-      {/* Receive dialog */}
-      <ConfirmDialog
-        open={dialog === 'receive'}
-        onOpenChange={(open) => !open && setDialog(null)}
-        title="Registrar recepcion"
-        description="Confirma que has recibido los materiales."
-        confirmLabel="Confirmar Recepcion"
-        showComment
-        commentLabel="Notas de recepcion"
-        onConfirm={handleConfirm}
-        loading={isLoading}
+      {/* Purchase Order Form */}
+      <PurchaseOrderForm
+        open={poFormOpen}
+        onOpenChange={setPoFormOpen}
+        request={request}
       />
     </>
   )
