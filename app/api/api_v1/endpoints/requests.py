@@ -80,20 +80,20 @@ def _build_role_filter(query, current_user: User):
     """Apply role-based visibility filter to a query."""
     role_name = current_user.role.name if current_user.role else None
 
-    if role_name == "Admin":
-        pass  # Admin sees all
-    elif role_name == "Technical Approver":
+    if role_name in ("Admin", "Technical Approver"):
+        pass  # Full visibility — Technical Approver needs to track approved requests
+    elif role_name in ("Financial Approver", "Finance 2", "Finance"):
+        # Finance roles see all post-approval requests (to navigate to OC approvals)
         query = query.where(
             or_(
                 Request.requester_id == current_user.id,
-                Request.status == RequestStatus.PENDING_TECHNICAL,
-            )
-        )
-    elif role_name == "Financial Approver":
-        query = query.where(
-            or_(
-                Request.requester_id == current_user.id,
-                Request.status == RequestStatus.PENDING_FINANCIAL,
+                Request.status.in_([
+                    RequestStatus.APPROVED,
+                    RequestStatus.PURCHASING,
+                    RequestStatus.RECEIVED_PARTIAL,
+                    RequestStatus.RECEIVED_FULL,
+                    RequestStatus.COMPLETED,
+                ]),
             )
         )
     elif role_name == "Purchasing":
@@ -250,7 +250,7 @@ async def approve_request(
     """Approve a request at the current workflow step."""
     request = await _load_request(db, request_id)
 
-    if request.status not in (RequestStatus.PENDING_TECHNICAL, RequestStatus.PENDING_FINANCIAL):
+    if request.status not in (RequestStatus.PENDING_TECHNICAL,):
         raise HTTPException(status_code=400, detail="Request is not in a pending approval state")
 
     wf_engine = WorkflowEngine(db)
@@ -286,7 +286,7 @@ async def reject_request(
     """Reject a request. Releases reserved budget."""
     request = await _load_request(db, request_id)
 
-    if request.status not in (RequestStatus.PENDING_TECHNICAL, RequestStatus.PENDING_FINANCIAL):
+    if request.status not in (RequestStatus.PENDING_TECHNICAL,):
         raise HTTPException(status_code=400, detail="Request is not in a pending approval state")
 
     wf_engine = WorkflowEngine(db)

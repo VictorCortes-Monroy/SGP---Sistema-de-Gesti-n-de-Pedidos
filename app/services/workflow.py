@@ -11,7 +11,7 @@ from app.models.maintenance.request import MaintRequest
 # Map role names to the PENDING status that corresponds to their approval step
 ROLE_TO_PENDING_STATUS = {
     "Technical Approver": RequestStatus.PENDING_TECHNICAL,
-    "Financial Approver": RequestStatus.PENDING_FINANCIAL,
+    # "Financial Approver" removed — financial approval now lives on the Purchase Order
 }
 
 

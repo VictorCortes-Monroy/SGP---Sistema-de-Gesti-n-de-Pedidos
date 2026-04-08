@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { purchaseOrdersApi } from '@/api/purchase-orders'
 import { toast } from 'sonner'
-import type { PurchaseOrderCreate, POReceptionInput, QuotationCreate } from '@/api/types'
+import type { PurchaseOrderCreate, POReceptionInput, QuotationCreate, POFinanceAction } from '@/api/types'
 
 export function usePurchaseOrdersForRequest(requestId: string) {
   return useQuery({
@@ -73,6 +73,55 @@ export function useQuotationsForRequest(requestId: string) {
     queryKey: ['quotations', requestId],
     queryFn: () => purchaseOrdersApi.listQuotations(requestId),
     enabled: !!requestId,
+  })
+}
+
+export function useFinanceApprovePO() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: POFinanceAction }) =>
+      purchaseOrdersApi.financeApprove(id, payload),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['purchase-order', data.id] })
+      qc.invalidateQueries({ queryKey: ['purchase-orders', { request_id: data.request_id }] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+      toast.success('OC aprobada correctamente')
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'Error al aprobar OC')
+    },
+  })
+}
+
+export function useFinanceRejectPO() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: POFinanceAction }) =>
+      purchaseOrdersApi.financeReject(id, payload),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['purchase-order', data.id] })
+      qc.invalidateQueries({ queryKey: ['purchase-orders', { request_id: data.request_id }] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+      toast.success('OC rechazada — vuelve a Borrador')
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'Error al rechazar OC')
+    },
+  })
+}
+
+export function useResubmitPO() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => purchaseOrdersApi.resubmit(id),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['purchase-order', data.id] })
+      qc.invalidateQueries({ queryKey: ['purchase-orders', { request_id: data.request_id }] })
+      toast.success('OC reenviada a aprobación')
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || 'Error al reenviar OC')
+    },
   })
 }
 

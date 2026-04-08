@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { AlertCircle } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -35,6 +36,7 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
   const [paymentTermsDays, setPaymentTermsDays] = useState('')
   const [paymentTermsText, setPaymentTermsText] = useState('')
   const [notes, setNotes] = useState('')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   const [items, setItems] = useState<ItemRow[]>(() =>
     request.items.map((ri) => ({
@@ -75,6 +77,7 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
 
   const handleSubmit = () => {
     if (!supplierId) return
+    setErrorMsg(null)
 
     createPO.mutate(
       {
@@ -93,6 +96,10 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
           onOpenChange(false)
           resetForm()
         },
+        onError: (err: any) => {
+          const msg = err?.response?.data?.detail || err?.message || 'Error al crear la Orden de Compra'
+          setErrorMsg(typeof msg === 'string' ? msg : JSON.stringify(msg))
+        },
       }
     )
   }
@@ -105,6 +112,7 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
     setPaymentTermsDays('')
     setPaymentTermsText('')
     setNotes('')
+    setErrorMsg(null)
     setItems(
       request.items.map((ri) => ({
         _rowKey: ri.id,
@@ -270,6 +278,13 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
             </div>
           )}
         </div>
+
+        {errorMsg && (
+          <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => { onOpenChange(false); resetForm() }}>

@@ -9,25 +9,24 @@ interface Step {
 }
 
 const STEPS: Step[] = [
-  { id: 'DRAFT',              label: 'Borrador',        matchStatuses: ['DRAFT'] },
-  { id: 'PENDING_TECHNICAL',  label: 'Aprob. Técnica',  matchStatuses: ['PENDING_TECHNICAL'] },
-  { id: 'PENDING_FINANCIAL',  label: 'Aprob. Financiera', matchStatuses: ['PENDING_FINANCIAL'] },
-  { id: 'APPROVED',           label: 'Aprobado',        matchStatuses: ['APPROVED'] },
-  { id: 'PURCHASING',         label: 'En Compra',       matchStatuses: ['PURCHASING'] },
-  { id: 'RECEIVED',           label: 'Recepción',       matchStatuses: ['RECEIVED_PARTIAL', 'RECEIVED_FULL'] },
-  { id: 'COMPLETED',          label: 'Completado',      matchStatuses: ['COMPLETED'] },
+  { id: 'DRAFT',             label: 'Borrador',       matchStatuses: ['DRAFT'] },
+  { id: 'PENDING_TECHNICAL', label: 'Aprob. Técnica', matchStatuses: ['PENDING_TECHNICAL'] },
+  { id: 'APPROVED',          label: 'Aprobado',       matchStatuses: ['APPROVED'] },
+  { id: 'PURCHASING',        label: 'En Compra',      matchStatuses: ['PURCHASING'] },
+  { id: 'RECEIVED',          label: 'Recepción',      matchStatuses: ['RECEIVED_PARTIAL', 'RECEIVED_FULL'] },
+  { id: 'COMPLETED',         label: 'Completado',     matchStatuses: ['COMPLETED'] },
 ]
 
 // Index in the main flow
 const STATUS_STEP_INDEX: Record<RequestStatus, number> = {
   DRAFT: 0,
   PENDING_TECHNICAL: 1,
-  PENDING_FINANCIAL: 2,
-  APPROVED: 3,
-  PURCHASING: 4,
-  RECEIVED_PARTIAL: 5,
-  RECEIVED_FULL: 5,
-  COMPLETED: 6,
+  PENDING_FINANCIAL: 1, // legacy backward compat — map to same level as technical
+  APPROVED: 2,
+  PURCHASING: 3,
+  RECEIVED_PARTIAL: 4,
+  RECEIVED_FULL: 4,
+  COMPLETED: 5,
   REJECTED: -1,
   CANCELLED: -1,
 }
@@ -41,20 +40,16 @@ const PENDING_ACTIONS: Partial<Record<RequestStatus, { actor: string; text: stri
     actor: 'Aprobador Técnico',
     text: 'Revisar los ítems y aprobar o rechazar la solicitud',
   },
-  PENDING_FINANCIAL: {
-    actor: 'Aprobador Financiero',
-    text: 'Revisar el monto y aprobar o rechazar la solicitud',
-  },
   APPROVED: {
     actor: 'Compras',
-    text: 'Gestionar la orden de compra con el proveedor seleccionado',
+    text: 'Generar la Orden de Compra con el proveedor seleccionado',
   },
   PURCHASING: {
-    actor: 'Solicitante',
-    text: 'Registrar la recepción de materiales una vez lleguen a bodega',
+    actor: 'Compras / Finanzas',
+    text: 'La OC está en proceso de aprobación financiera o pendiente de envío al proveedor',
   },
   RECEIVED_PARTIAL: {
-    actor: 'Solicitante',
+    actor: 'Compras',
     text: 'Recepción parcial registrada — pendiente confirmar los ítems restantes',
   },
   RECEIVED_FULL: {

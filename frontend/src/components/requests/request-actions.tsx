@@ -34,8 +34,7 @@ export function RequestActions({ request }: RequestActionsProps) {
 
   const canSubmit = status === 'DRAFT' && (roleName === 'Admin' || user?.id === request.requester_id)
   const canApprove =
-    (status === 'PENDING_TECHNICAL' && (roleName === 'Technical Approver' || roleName === 'Admin')) ||
-    (status === 'PENDING_FINANCIAL' && (roleName === 'Financial Approver' || roleName === 'Admin'))
+    status === 'PENDING_TECHNICAL' && (roleName === 'Technical Approver' || roleName === 'Admin')
   const canReject = canApprove
   const canCancel =
     ['DRAFT', 'PENDING_TECHNICAL', 'PENDING_FINANCIAL'].includes(status) &&

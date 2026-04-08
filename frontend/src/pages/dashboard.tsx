@@ -44,7 +44,7 @@ function AdminDashboard() {
                 <RequestKanban showFinancials={showFinancials} />
               </CardContent>
             </Card>
-            <PendingActions items={data.pending_actions} />
+            <PendingActions items={data.pending_actions} ocItems={data.pending_oc_approvals} />
           </div>
 
           {/* Recent + Budget */}

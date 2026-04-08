@@ -9,6 +9,7 @@ from .catalog import Supplier, CatalogItem, SupplierProduct
 from .purchase_order import (
     PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus,
     Quotation, QuotationItem, QuotationStatus,
+    POApprovalLog,
 )
 
 from .maintenance import *

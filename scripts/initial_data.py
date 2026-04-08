@@ -24,13 +24,15 @@ async def seed_data(db: AsyncSession):
     role_admin = Role(name="Admin", description="System administrator")
     role_requester = Role(name="Requester", description="Orders items")
     role_tech_approver = Role(name="Technical Approver", description="Validates specs")
-    role_fin_approver = Role(name="Financial Approver", description="Validates money")
+    role_fin_approver = Role(name="Financial Approver", description="Finance 1 — Approves OC between 1M and 5M CLP")
     role_maint_planner = Role(name="maintenance_planner", description="Maintenance Planner")
     role_maint_chief = Role(name="maintenance_chief", description="Maintenance Chief")
     role_purchasing = Role(name="Purchasing", description="Abastecimiento - Genera OC y valida facturas")
-    role_finance = Role(name="Finance", description="Finanzas - Aprueba pagos")
+    role_finance = Role(name="Finance", description="Finanzas - visibilidad financiera")
+    role_finance2 = Role(name="Finance 2", description="Gerencia General — Aprueba OC mayor a 5 millones CLP")
 
-    db.add_all([role_admin, role_requester, role_tech_approver, role_fin_approver, role_maint_planner, role_maint_chief, role_purchasing, role_finance])
+    db.add_all([role_admin, role_requester, role_tech_approver, role_fin_approver,
+                role_maint_planner, role_maint_chief, role_purchasing, role_finance, role_finance2])
     await db.commit()
     await db.refresh(role_admin)
     await db.refresh(role_requester)
@@ -38,6 +40,7 @@ async def seed_data(db: AsyncSession):
     await db.refresh(role_fin_approver)
     await db.refresh(role_purchasing)
     await db.refresh(role_finance)
+    await db.refresh(role_finance2)
     
     # 2. Create Company & Cost Center
     company = Company(name="TechCorp", tax_id="99.999.999-K")
@@ -103,11 +106,18 @@ async def seed_data(db: AsyncSession):
         role_id=role_finance.id,
         full_name="Diana Finanzas"
     )
-    db.add_all([u_admin, u_req, u_tech, u_fin, u_maint_planner, u_maint_chief, u_purchasing, u_finance])
+    u_gm = User(
+        email="gm@example.com",
+        hashed_password=security.get_password_hash("password"),
+        role_id=role_finance2.id,
+        full_name="Gerente General"
+    )
+    db.add_all([u_admin, u_req, u_tech, u_fin, u_maint_planner, u_maint_chief, u_purchasing, u_finance, u_gm])
     
     # 5. Create Approval Matrix — global rules (company_id=None, cost_center_id=None
     #    means "applies to all companies and cost centers")
-    # Rule 1: All requests (any amount) require Technical Approval (step 1)
+    # Rule 1: All requests require Technical Approval (step 1).
+    # Financial approval has moved to the Purchase Order workflow — no step 2 here.
     rule1 = ApprovalMatrix(
         company_id=None,
         cost_center_id=None,
@@ -116,16 +126,7 @@ async def seed_data(db: AsyncSession):
         role_id=role_tech_approver.id,
         step_order=1
     )
-    # Rule 2: Requests >= $1,000 also require Financial Approval (step 2)
-    rule2 = ApprovalMatrix(
-        company_id=None,
-        cost_center_id=None,
-        min_amount=1000,
-        max_amount=None,
-        role_id=role_fin_approver.id,
-        step_order=2
-    )
-    db.add_all([rule1, rule2])
+    db.add_all([rule1])
     await db.commit()
 
     # 6. Seed Equipment Fleet

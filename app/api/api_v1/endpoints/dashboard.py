@@ -9,8 +9,10 @@ from app.models.users import User
 from app.models.request import Request, RequestStatus
 from app.models.budget import Budget
 from app.models.organization import CostCenter
+from app.models.purchase_order import PurchaseOrder, PurchaseOrderStatus
 from app.schemas.dashboard import (
-    DashboardSummary, PendingActionItem, RecentRequestItem, BudgetSummaryItem,
+    DashboardSummary, PendingActionItem, RecentRequestItem,
+    BudgetSummaryItem, POPendingActionItem,
 )
 
 router = APIRouter()
@@ -24,7 +26,7 @@ async def dashboard_summary(
 ) -> Any:
     """Consolidated dashboard data in a single call."""
 
-    # 1. Status distribution (all non-deleted requests)
+    # 1. Status distribution
     status_query = (
         select(Request.status, func.count())
         .where(Request.is_deleted == False)
@@ -38,20 +40,19 @@ async def dashboard_summary(
         status_distribution[key] = count
         total_requests += count
 
-    # 2. Pending actions based on user role
+    # 2. Pending REQUEST actions by role
     role_name = current_user.role.name if current_user.role else ""
     pending_statuses = []
 
     if role_name == "Admin":
-        pending_statuses = [RequestStatus.PENDING_TECHNICAL, RequestStatus.PENDING_FINANCIAL]
+        pending_statuses = [RequestStatus.PENDING_TECHNICAL]
     elif role_name == "Technical Approver":
         pending_statuses = [RequestStatus.PENDING_TECHNICAL]
-    elif role_name == "Financial Approver":
-        pending_statuses = [RequestStatus.PENDING_FINANCIAL]
     elif role_name == "Purchasing":
         pending_statuses = [RequestStatus.APPROVED, RequestStatus.PURCHASING]
     elif role_name == "Requester":
         pending_statuses = [RequestStatus.DRAFT, RequestStatus.REJECTED]
+    # Financial Approver and Finance 2 no longer approve requests — handled via OC approvals below
 
     pending_actions = []
     if pending_statuses:
@@ -61,7 +62,6 @@ async def dashboard_summary(
             .where(Request.is_deleted == False)
             .where(Request.status.in_(pending_statuses))
         )
-        # Requester only sees their own requests
         if role_name == "Requester":
             pending_query = pending_query.where(Request.requester_id == current_user.id)
 
@@ -77,14 +77,46 @@ async def dashboard_summary(
                 created_at=req.created_at,
             ))
 
-    # 3. Recent requests (last 5)
+    # 3. Pending OC approvals (for finance roles)
+    pending_oc_approvals = []
+    oc_pending_statuses = []
+
+    if role_name == "Admin":
+        oc_pending_statuses = [
+            PurchaseOrderStatus.PENDING_FINANCE_1,
+            PurchaseOrderStatus.PENDING_FINANCE_2,
+        ]
+    elif role_name == "Financial Approver":
+        oc_pending_statuses = [PurchaseOrderStatus.PENDING_FINANCE_1]
+    elif role_name == "Finance 2":
+        oc_pending_statuses = [PurchaseOrderStatus.PENDING_FINANCE_2]
+
+    if oc_pending_statuses:
+        po_query = (
+            select(PurchaseOrder)
+            .where(PurchaseOrder.status.in_(oc_pending_statuses))
+            .order_by(PurchaseOrder.created_at.desc())
+            .limit(20)
+        )
+        po_result = await db.execute(po_query)
+        for po in po_result.scalars().all():
+            pending_oc_approvals.append(POPendingActionItem(
+                po_id=po.id,
+                oc_number=po.oc_number,
+                status=po.status if isinstance(po.status, str) else po.status.value,
+                total_amount=po.total_amount,
+                currency=po.currency,
+                request_id=po.request_id,
+                created_at=po.created_at,
+            ))
+
+    # 4. Recent requests
     recent_query = (
         select(Request)
         .where(Request.is_deleted == False)
         .order_by(Request.created_at.desc())
         .limit(5)
     )
-    # Requester only sees their own
     if role_name == "Requester":
         recent_query = recent_query.where(Request.requester_id == current_user.id)
 
@@ -100,7 +132,7 @@ async def dashboard_summary(
         for req in recent_result.scalars().all()
     ]
 
-    # 4. Budget summary
+    # 5. Budget summary
     budget_query = (
         select(Budget, CostCenter)
         .join(CostCenter, Budget.cost_center_id == CostCenter.id)
@@ -122,6 +154,7 @@ async def dashboard_summary(
         total_requests=total_requests,
         status_distribution=status_distribution,
         pending_actions=pending_actions,
+        pending_oc_approvals=pending_oc_approvals,
         recent_requests=recent_requests,
         budget_summary=budget_summary,
     )

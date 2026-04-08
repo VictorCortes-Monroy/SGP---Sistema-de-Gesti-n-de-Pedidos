@@ -2,7 +2,7 @@ import apiClient from './client'
 import type {
   PurchaseOrderCreate, PurchaseOrderResponse, PurchaseOrderList,
   POReceptionInput, QuotationCreate, QuotationResponse,
-  PaginatedResponse,
+  PaginatedResponse, POFinanceAction,
 } from './types'
 
 export const purchaseOrdersApi = {
@@ -43,6 +43,21 @@ export const purchaseOrdersApi = {
 
   cancel: async (id: string): Promise<PurchaseOrderResponse> => {
     const { data } = await apiClient.post(`/purchase-orders/${id}/cancel`)
+    return data
+  },
+
+  financeApprove: async (id: string, payload: POFinanceAction): Promise<PurchaseOrderResponse> => {
+    const { data } = await apiClient.post(`/purchase-orders/${id}/finance-approve`, payload)
+    return data
+  },
+
+  financeReject: async (id: string, payload: POFinanceAction): Promise<PurchaseOrderResponse> => {
+    const { data } = await apiClient.post(`/purchase-orders/${id}/finance-reject`, payload)
+    return data
+  },
+
+  resubmit: async (id: string): Promise<PurchaseOrderResponse> => {
+    const { data } = await apiClient.post(`/purchase-orders/${id}/resubmit`)
     return data
   },
 

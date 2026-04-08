@@ -30,9 +30,20 @@ class BudgetSummaryItem(BaseModel):
     available_amount: Decimal
 
 
+class POPendingActionItem(BaseModel):
+    po_id: UUID
+    oc_number: str
+    status: str
+    total_amount: Decimal
+    currency: str
+    request_id: UUID
+    created_at: datetime
+
+
 class DashboardSummary(BaseModel):
     total_requests: int
     status_distribution: Dict[str, int]
     pending_actions: List[PendingActionItem]
+    pending_oc_approvals: List[POPendingActionItem] = []
     recent_requests: List[RecentRequestItem]
     budget_summary: List[BudgetSummaryItem]

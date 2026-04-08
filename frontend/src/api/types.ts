@@ -234,10 +234,21 @@ export interface BudgetSummaryItem {
   available_amount: number
 }
 
+export interface POPendingActionItem {
+  po_id: string
+  oc_number: string
+  status: string
+  total_amount: number
+  currency: string
+  request_id: string
+  created_at: string
+}
+
 export interface DashboardSummary {
   total_requests: number
   status_distribution: Record<string, number>
   pending_actions: PendingActionItem[]
+  pending_oc_approvals: POPendingActionItem[]
   recent_requests: RecentRequestItem[]
   budget_summary: BudgetSummaryItem[]
 }
@@ -636,8 +647,32 @@ export interface SupplierSpendEntry {
 // ── Purchase Orders ──────────────────────────────────────────────────────────
 
 export type POStatus =
-  | 'DRAFT' | 'SENT' | 'RECEIVED_PARTIAL' | 'RECEIVED_FULL'
-  | 'CLOSED' | 'CANCELLED'
+  | 'DRAFT'
+  | 'PENDING_FINANCE_1'
+  | 'PENDING_FINANCE_2'
+  | 'AUTHORIZED'
+  | 'SENT'
+  | 'RECEIVED_PARTIAL'
+  | 'RECEIVED_FULL'
+  | 'CLOSED'
+  | 'CANCELLED'
+
+export interface POApprovalLog {
+  id: string
+  po_id: string
+  actor_id: string
+  actor_name: string | null
+  action: string
+  finance_level: number
+  from_status: string
+  to_status: string
+  comment: string | null
+  timestamp: string
+}
+
+export interface POFinanceAction {
+  comment?: string
+}
 
 export type QuotationStatus = 'RECEIVED' | 'SELECTED' | 'REJECTED'
 
@@ -672,6 +707,7 @@ export interface PurchaseOrderResponse {
   created_at: string
   updated_at: string
   items: PurchaseOrderItemResponse[]
+  approval_logs: POApprovalLog[]
 }
 
 export interface PurchaseOrderList extends Omit<PurchaseOrderResponse, 'items'> {}

@@ -8,12 +8,15 @@ from app.db.base import Base
 
 
 class PurchaseOrderStatus(str, enum.Enum):
-    DRAFT            = "DRAFT"
-    SENT             = "SENT"
-    RECEIVED_PARTIAL = "RECEIVED_PARTIAL"
-    RECEIVED_FULL    = "RECEIVED_FULL"
-    CLOSED           = "CLOSED"
-    CANCELLED        = "CANCELLED"
+    DRAFT             = "DRAFT"
+    PENDING_FINANCE_1 = "PENDING_FINANCE_1"
+    PENDING_FINANCE_2 = "PENDING_FINANCE_2"
+    AUTHORIZED        = "AUTHORIZED"
+    SENT              = "SENT"
+    RECEIVED_PARTIAL  = "RECEIVED_PARTIAL"
+    RECEIVED_FULL     = "RECEIVED_FULL"
+    CLOSED            = "CLOSED"
+    CANCELLED         = "CANCELLED"
 
 
 class QuotationStatus(str, enum.Enum):
@@ -88,11 +91,14 @@ class PurchaseOrder(Base):
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    request     = relationship("Request",   back_populates="purchase_orders")
-    supplier    = relationship("Supplier",  back_populates="purchase_orders")
-    quotation   = relationship("Quotation", back_populates="purchase_orders", foreign_keys=[quotation_id])
-    items       = relationship("PurchaseOrderItem", back_populates="purchase_order", cascade="all, delete-orphan")
-    created_by  = relationship("User", foreign_keys=[created_by_id])
+    request       = relationship("Request",   back_populates="purchase_orders")
+    supplier      = relationship("Supplier",  back_populates="purchase_orders")
+    quotation     = relationship("Quotation", back_populates="purchase_orders", foreign_keys=[quotation_id])
+    items         = relationship("PurchaseOrderItem", back_populates="purchase_order", cascade="all, delete-orphan")
+    created_by    = relationship("User", foreign_keys=[created_by_id])
+    approval_logs = relationship("POApprovalLog", back_populates="purchase_order",
+                                 cascade="all, delete-orphan",
+                                 order_by="POApprovalLog.timestamp")
 
     @property
     def supplier_name(self):
@@ -117,3 +123,22 @@ class PurchaseOrderItem(Base):
     purchase_order = relationship("PurchaseOrder", back_populates="items")
     request_item   = relationship("RequestItem",   back_populates="purchase_order_items")
     catalog_item   = relationship("CatalogItem",   back_populates="purchase_order_items")
+
+
+class POApprovalLog(Base):
+    __tablename__ = "po_approval_logs"
+
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_id         = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    actor_id      = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    action        = Column(String, nullable=False)          # APPROVE | REJECT | RESUBMITTED
+    finance_level = Column(Integer, nullable=False)         # 1 or 2 (0 for resubmit)
+    from_status   = Column(String, nullable=False)
+    to_status     = Column(String, nullable=False)
+    comment       = Column(Text, nullable=True)
+    ip_address    = Column(String, nullable=True)
+    timestamp     = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    purchase_order = relationship("PurchaseOrder", back_populates="approval_logs")
+    actor          = relationship("User", foreign_keys=[actor_id])

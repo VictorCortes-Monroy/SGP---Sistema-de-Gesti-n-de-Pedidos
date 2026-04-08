@@ -131,6 +131,7 @@ class PurchaseOrderResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     items: List[PurchaseOrderItemResponse] = []
+    approval_logs: List["POApprovalLogResponse"] = []
 
 
 class PurchaseOrderList(BaseModel):
@@ -157,3 +158,39 @@ class ItemReceptionUpdate(BaseModel):
 class POReceptionInput(BaseModel):
     items: List[ItemReceptionUpdate]
     notes: Optional[str] = None
+
+
+# ── Finance Approval ───────────────────────────────────────────────────────────
+
+class POFinanceAction(BaseModel):
+    comment: Optional[str] = None
+
+
+class POApprovalLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    po_id: UUID
+    actor_id: UUID
+    actor_name: Optional[str] = None
+    action: str
+    finance_level: int
+    from_status: str
+    to_status: str
+    comment: Optional[str] = None
+    timestamp: datetime
+
+    @classmethod
+    def from_orm_with_actor(cls, log: object) -> "POApprovalLogResponse":
+        actor_name = log.actor.full_name if log.actor else None  # type: ignore
+        return cls(
+            id=log.id,  # type: ignore
+            po_id=log.po_id,  # type: ignore
+            actor_id=log.actor_id,  # type: ignore
+            actor_name=actor_name,
+            action=log.action,  # type: ignore
+            finance_level=log.finance_level,  # type: ignore
+            from_status=log.from_status,  # type: ignore
+            to_status=log.to_status,  # type: ignore
+            comment=log.comment,  # type: ignore
+            timestamp=log.timestamp,  # type: ignore
+        )
