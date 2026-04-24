@@ -16,14 +16,11 @@ import { RequestItemRow } from './request-item-row'
 import { useCreateRequest, useSubmitRequest, useUploadRequestDocument } from '@/hooks/use-requests'
 import { useCompanies, useCostCenters } from '@/hooks/use-organizations'
 import { useCatalogItems } from '@/hooks/use-catalog'
-import { formatCurrency } from '@/lib/format'
 import type { PurchaseType, CatalogItem } from '@/api/types'
 
 const itemSchema = z.object({
   description: z.string().min(1, 'Descripcion requerida'),
-  sku: z.string().optional().default(''),
   quantity: z.number().min(1, 'Minimo 1'),
-  unit_price: z.number().min(0.01, 'Precio invalido'),
   catalog_item_id: z.string().optional(),
 })
 
@@ -37,7 +34,7 @@ const requestSchema = z.object({
 
 type RequestFormData = z.infer<typeof requestSchema>
 
-const emptyItem = { description: '', sku: '', quantity: 1, unit_price: 0, catalog_item_id: undefined as string | undefined }
+const emptyItem = { description: '', quantity: 1, catalog_item_id: undefined as string | undefined }
 
 const PURCHASE_TYPES: { value: PurchaseType; label: string; description: string }[] = [
   { value: 'INSUMOS', label: 'Insumos / Materiales', description: 'Consumibles, repuestos, materiales de operación' },
@@ -129,7 +126,7 @@ export function RequestForm() {
       description: '',
       cost_center_id: '',
       purchase_type: 'INSUMOS',
-      items: [{ description: '', sku: '', quantity: 1, unit_price: 0 }],
+      items: [{ description: '', quantity: 1 }],
     },
   })
 
@@ -162,8 +159,6 @@ export function RequestForm() {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const total = items.reduce((sum, item) => sum + (item.quantity || 0) * (item.unit_price || 0), 0)
-
   const onSubmit = async (data: RequestFormData, submitAfter: boolean) => {
     try {
       const result = await createRequest.mutateAsync({
@@ -173,9 +168,7 @@ export function RequestForm() {
         purchase_type: data.purchase_type,
         items: data.items.map((item) => ({
           description: item.description,
-          sku: item.sku || undefined,
           quantity: item.quantity,
-          unit_price: item.unit_price,
           catalog_item_id: item.catalog_item_id || undefined,
         })),
       })
@@ -311,11 +304,8 @@ export function RequestForm() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground">
-            <div className="col-span-4">Descripcion</div>
-            <div className="col-span-2">SKU</div>
+            <div className="col-span-9">Descripción</div>
             <div className="col-span-2">Cantidad</div>
-            <div className="col-span-2">Precio Unit.</div>
-            <div className="col-span-1 text-right">Subtotal</div>
             <div className="col-span-1" />
           </div>
 
@@ -324,8 +314,6 @@ export function RequestForm() {
               <CatalogSearchField
                 onSelect={(catalogItem) => {
                   updateItem(idx, 'description', catalogItem.name)
-                  updateItem(idx, 'sku', catalogItem.sku)
-                  if (catalogItem.reference_price) updateItem(idx, 'unit_price', catalogItem.reference_price)
                   updateItem(idx, 'catalog_item_id', catalogItem.id)
                 }}
               />
@@ -346,12 +334,6 @@ export function RequestForm() {
           {errors.items && typeof errors.items.message === 'string' && (
             <p className="text-xs text-destructive">{errors.items.message}</p>
           )}
-
-          <Separator />
-
-          <div className="flex justify-end">
-            <span className="text-lg font-bold">Total: {formatCurrency(total)}</span>
-          </div>
         </CardContent>
       </Card>
 

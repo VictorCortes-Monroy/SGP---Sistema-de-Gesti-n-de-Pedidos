@@ -11,7 +11,8 @@ class RequestItemBase(BaseModel):
     description: str
     sku: Optional[str] = None
     quantity: Decimal
-    unit_price: Decimal
+    # unit_price is optional — it's set on the Purchase Order, not on the SP
+    unit_price: Optional[Decimal] = None
     catalog_item_id: Optional[UUID] = None
 
 
@@ -23,7 +24,7 @@ class RequestItem(RequestItemBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    total_price: Decimal
+    total_price: Optional[Decimal] = None
 
 
 class RequestDocumentResponse(BaseModel):

@@ -63,8 +63,9 @@ class RequestItem(Base):
     description = Column(String, nullable=False)
     sku = Column(String, nullable=True)
     quantity = Column(Numeric(10, 2), nullable=False)
-    unit_price = Column(Numeric(14, 2), nullable=False)
-    total_price = Column(Numeric(14, 2), nullable=False)
+    # Prices are optional on the SP — they are captured on the Purchase Order instead.
+    unit_price = Column(Numeric(14, 2), nullable=True, default=0)
+    total_price = Column(Numeric(14, 2), nullable=True, default=0)
 
     request = relationship("Request", back_populates="items")
     catalog_item = relationship("CatalogItem", back_populates="request_items")

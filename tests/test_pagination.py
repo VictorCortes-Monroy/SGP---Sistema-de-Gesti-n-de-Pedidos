@@ -77,4 +77,4 @@ class TestPagination:
         assert resp.status_code == 200
         body = resp.json()
         assert "items" in body
-        assert body["total"] == 2
+        assert body["total"] == 1

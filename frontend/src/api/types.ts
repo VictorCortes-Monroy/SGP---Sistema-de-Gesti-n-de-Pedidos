@@ -54,15 +54,17 @@ export interface RequestItem {
   description: string
   sku: string | null
   quantity: number
-  unit_price: number
-  total_price: number
+  // Prices are optional — captured on the Purchase Order, not on the SP
+  unit_price: number | null
+  total_price: number | null
 }
 
 export interface RequestItemCreate {
   description: string
   sku?: string
   quantity: number
-  unit_price: number
+  unit_price?: number
+  catalog_item_id?: string
 }
 
 export interface RequestCreate {

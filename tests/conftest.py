@@ -148,10 +148,9 @@ async def seed_data(db: AsyncSession):
     db.add_all([admin, requester, tech, fin])
     await db.flush()
 
-    # Approval Matrix
+    # Approval Matrix — Tech-only; financial approval moved to Purchase Order
     rule1 = ApprovalMatrix(company_id=company.id, cost_center_id=cc.id, min_amount=0, max_amount=None, role_id=role_tech.id, step_order=1)
-    rule2 = ApprovalMatrix(company_id=company.id, cost_center_id=cc.id, min_amount=1000, max_amount=None, role_id=role_fin.id, step_order=2)
-    db.add_all([rule1, rule2])
+    db.add(rule1)
 
     await db.commit()
 

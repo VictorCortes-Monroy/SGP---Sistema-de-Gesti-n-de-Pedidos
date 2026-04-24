@@ -22,8 +22,8 @@ def _make_request(seed_data, amount=5000):
 
 
 class TestGetRequiredApprovals:
-    async def test_high_amount_requires_two_steps(self, db, seed_data):
-        """Amount >= 1000 should require both tech and financial steps."""
+    async def test_single_step_tech_only(self, db, seed_data):
+        """SP workflow has only the technical step; financial approval moved to PO."""
         req = _make_request(seed_data, amount=5000)
         db.add(req)
         await db.flush()
@@ -35,12 +35,11 @@ class TestGetRequiredApprovals:
 
         engine = WorkflowEngine(db)
         steps = await engine.get_required_approvals(req)
-        assert len(steps) == 2
+        assert len(steps) == 1
         assert steps[0].role.name == "Technical Approver"
-        assert steps[1].role.name == "Financial Approver"
 
     async def test_low_amount_requires_one_step(self, db, seed_data):
-        """Amount < 1000 should require only tech step."""
+        """Any amount should require only the tech step on the SP."""
         req = _make_request(seed_data, amount=500)
         db.add(req)
         await db.flush()
@@ -70,21 +69,6 @@ class TestGetNextApproverRole:
         role = await engine.get_next_approver_role(req)
         assert role is not None
         assert role.name == "Technical Approver"
-
-    async def test_step1_returns_financial(self, db, seed_data):
-        req = _make_request(seed_data, amount=5000)
-        req.current_step = 1
-        db.add(req)
-        await db.flush()
-        result = await db.execute(
-            select(Request).options(selectinload(Request.cost_center)).where(Request.id == req.id)
-        )
-        req = result.scalars().first()
-
-        engine = WorkflowEngine(db)
-        role = await engine.get_next_approver_role(req)
-        assert role is not None
-        assert role.name == "Financial Approver"
 
     async def test_beyond_steps_returns_none(self, db, seed_data):
         req = _make_request(seed_data, amount=5000)
@@ -116,7 +100,8 @@ class TestDetermineStatusForStep:
         status = await engine.determine_status_for_step(steps, 0)
         assert status == RequestStatus.PENDING_TECHNICAL
 
-    async def test_step1_pending_financial(self, db, seed_data):
+    async def test_step1_returns_approved(self, db, seed_data):
+        """After tech approval (step 1 index), SP is APPROVED — no further step on SP."""
         req = _make_request(seed_data, amount=5000)
         db.add(req)
         await db.flush()
@@ -128,7 +113,7 @@ class TestDetermineStatusForStep:
         engine = WorkflowEngine(db)
         steps = await engine.get_required_approvals(req)
         status = await engine.determine_status_for_step(steps, 1)
-        assert status == RequestStatus.PENDING_FINANCIAL
+        assert status == RequestStatus.APPROVED
 
     async def test_beyond_steps_approved(self, db, seed_data):
         req = _make_request(seed_data, amount=5000)
@@ -161,7 +146,7 @@ class TestProcessAction:
         engine = WorkflowEngine(db)
         req = await engine.process_action(req, tech_user, "APPROVE", comment="OK")
         assert req.current_step == 1
-        assert req.status == RequestStatus.PENDING_FINANCIAL
+        assert req.status == RequestStatus.APPROVED
 
     async def test_approve_wrong_role_raises(self, db, seed_data):
         req = _make_request(seed_data, amount=5000)

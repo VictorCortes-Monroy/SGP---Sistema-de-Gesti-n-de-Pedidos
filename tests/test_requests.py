@@ -72,13 +72,11 @@ class TestSubmitRequest:
 
 class TestApprovalWorkflow:
     async def test_full_approval_flow(self, client, seed_data):
-        """DRAFT -> PENDING_TECHNICAL -> PENDING_FINANCIAL -> APPROVED"""
+        """DRAFT -> PENDING_TECHNICAL -> APPROVED (financial approval moved to PO)"""
         requester = seed_data["users"]["requester"]
         tech = seed_data["users"]["tech"]
-        fin = seed_data["users"]["financial"]
         cc = seed_data["cost_center"]
 
-        # Create + Submit (amount > 1000 => needs both approvals)
         resp = await client.post(
             f"{API}/requests/",
             headers=auth_header(requester.id),
@@ -87,20 +85,11 @@ class TestApprovalWorkflow:
         req_id = resp.json()["id"]
         await client.post(f"{API}/requests/{req_id}/submit", headers=auth_header(requester.id))
 
-        # Tech approve
+        # Tech approve — final step on SP; financial approval lives on the Purchase Order
         resp = await client.post(
             f"{API}/requests/{req_id}/approve",
             headers=auth_header(tech.id),
             json={"comment": "Tech OK"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "PENDING_FINANCIAL"
-
-        # Financial approve
-        resp = await client.post(
-            f"{API}/requests/{req_id}/approve",
-            headers=auth_header(fin.id),
-            json={"comment": "Finance OK"},
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "APPROVED"
@@ -276,13 +265,13 @@ class TestTimeline:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["current_status"] in ("PENDING_FINANCIAL", "APPROVED")
+        assert body["current_status"] == "APPROVED"
         assert len(body["logs"]) >= 2
 
 
-class TestSubmitErrorPaths:
-    async def test_submit_no_budget_defined(self, client, db, seed_data):
-        """Submit to a cost center without a budget should return 400."""
+class TestSubmitHappyPaths:
+    async def test_submit_without_budget_succeeds(self, client, db, seed_data):
+        """Submitting to a CC without a budget should proceed (budget is reference-only)."""
         user = seed_data["users"]["requester"]
         company = seed_data["company"]
 
@@ -300,11 +289,11 @@ class TestSubmitErrorPaths:
         resp = await client.post(
             f"{API}/requests/{req_id}/submit", headers=auth_header(user.id)
         )
-        assert resp.status_code == 400
-        assert "Budget not found" in resp.json()["detail"]
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "PENDING_TECHNICAL"
 
-    async def test_submit_insufficient_funds(self, client, seed_data):
-        """Submit when amount exceeds available budget should return 400."""
+    async def test_submit_allows_overdraft(self, client, seed_data):
+        """Submit is allowed even when the amount exceeds available budget."""
         user = seed_data["users"]["requester"]
         cc = seed_data["cost_center"]
 
@@ -318,8 +307,13 @@ class TestSubmitErrorPaths:
         resp = await client.post(
             f"{API}/requests/{req_id}/submit", headers=auth_header(user.id)
         )
-        assert resp.status_code == 400
-        assert "Insufficient" in resp.json()["detail"]
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "PENDING_TECHNICAL"
+
+        # Budget is allowed to go negative — reserva procede aunque sobrepase
+        budget_resp = await client.get(f"{API}/budgets/", headers=auth_header(user.id))
+        items = budget_resp.json()["items"]
+        assert any(float(b["available_amount"]) < 0 for b in items)
 
     async def test_other_user_cannot_submit(self, client, seed_data):
         """Only the requester can submit their own request."""

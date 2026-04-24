@@ -198,10 +198,10 @@ export default function RequestDetailPage() {
                         <TableCell>{item.description}</TableCell>
                         <TableCell className="text-muted-foreground font-mono text-xs">{item.sku ?? '-'}</TableCell>
                         <TableCell className="text-right">{item.quantity}</TableCell>
-                        {showFinancials && <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>}
+                        {showFinancials && <TableCell className="text-right">{formatCurrency(item.unit_price ?? 0)}</TableCell>}
                         {showFinancials && (
                           <TableCell className="text-right font-medium">
-                            {formatCurrency(item.quantity * item.unit_price)}
+                            {formatCurrency(item.quantity * (item.unit_price ?? 0))}
                           </TableCell>
                         )}
                       </TableRow>

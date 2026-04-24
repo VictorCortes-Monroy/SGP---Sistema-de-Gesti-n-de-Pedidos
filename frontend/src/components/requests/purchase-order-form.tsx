@@ -44,7 +44,7 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
       request_item_id: ri.id,
       description: ri.description,
       quantity_ordered: ri.quantity,
-      unit_price: ri.unit_price,
+      unit_price: ri.unit_price ?? 0,
     }))
   )
 
@@ -119,7 +119,7 @@ export function PurchaseOrderForm({ open, onOpenChange, request }: PurchaseOrder
         request_item_id: ri.id,
         description: ri.description,
         quantity_ordered: ri.quantity,
-        unit_price: ri.unit_price,
+        unit_price: ri.unit_price ?? 0,
       }))
     )
   }

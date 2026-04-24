@@ -63,9 +63,10 @@ class TestReserveFunds:
         )
         assert result.scalars().first() is not None
 
-    async def test_reserve_insufficient_raises(self, db, seed_data):
+    async def test_reserve_allows_overdraft(self, db, seed_data):
+        """Reserving over the budget is allowed — budget is reference-only."""
         req = Request(
-            title="Too Expensive",
+            title="Over Budget",
             requester_id=seed_data["users"]["requester"].id,
             cost_center_id=seed_data["cost_center"].id,
             total_amount=Decimal("60000"),
@@ -75,11 +76,16 @@ class TestReserveFunds:
         await db.flush()
 
         svc = BudgetService(db)
-        with pytest.raises(ValueError, match="Insufficient funds"):
-            await svc.reserve_funds(req)
+        await svc.reserve_funds(req)
 
-    async def test_reserve_no_budget_raises(self, db, seed_data):
-        # Create CC without budget
+        budget = await svc.get_budget(seed_data["cost_center"].id)
+        assert float(budget.reserved_amount) == 60000.0
+        # Available goes negative — permitted by design
+        available = budget.total_amount - budget.reserved_amount - budget.executed_amount
+        assert available < 0
+
+    async def test_reserve_without_budget_is_noop(self, db, seed_data):
+        """Reserving against a CC without a budget is a silent no-op (no reservation created)."""
         cc2 = CostCenter(name="NoBudget", code="NB-001", company_id=seed_data["company"].id)
         db.add(cc2)
         await db.flush()
@@ -95,8 +101,13 @@ class TestReserveFunds:
         await db.flush()
 
         svc = BudgetService(db)
-        with pytest.raises(ValueError, match="Budget not found"):
-            await svc.reserve_funds(req)
+        await svc.reserve_funds(req)  # should not raise
+
+        # No reservation record created
+        result = await db.execute(
+            select(BudgetReservation).where(BudgetReservation.request_id == req.id)
+        )
+        assert result.scalars().first() is None
 
 
 class TestCommitFunds:

@@ -1,441 +1,252 @@
-# Procedimiento: Solicitudes de Pedido (Compra)
+# Instructivo: Solicitud de Pedido (SP)
 
-## Objetivo
-Definir el proceso completo para crear, aprobar, gestionar y completar una solicitud de pedido en el SGP.
-
----
-
-## Diagrama General del Proceso
-
-```
-┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  CREAR   │───>│   ENVIAR A   │───>│  APROBACIÓN  │───>│  APROBACIÓN  │
-│ SOLICITUD│    │  APROBACIÓN  │    │   TÉCNICA    │    │  FINANCIERA  │
-│ (DRAFT)  │    │  (SUBMIT)    │    │  (PASO 1)    │    │  (PASO 2*)   │
-└──────────┘    └──────────────┘    └──────────────┘    └──────────────┘
-                                          │                     │
-                                          ▼                     ▼
-                                    ┌──────────┐         ┌──────────┐
-                                    │ RECHAZAR │         │ APROBADA │
-                                    └──────────┘         └──────────┘
-                                                               │
-                                          ┌────────────────────┘
-                                          ▼
-                                    ┌──────────────┐    ┌──────────────┐
-                                    │   EN COMPRA  │───>│  RECEPCIÓN   │───> COMPLETADA
-                                    │ (PURCHASING) │    │   DE BIENES  │
-                                    └──────────────┘    └──────────────┘
-
-* Paso 2 solo aplica si monto > $1,000
-```
+> **Alcance:** procedimiento end-to-end para crear, aprobar, comprar y recepcionar una Solicitud de Pedido (SP) en el SGP.
+> **Versión de arquitectura:** la aprobación financiera ya **no** vive en la SP — pasó a la **Orden de Compra (OC)** con doble visación Finance 1 / Finance 2.
 
 ---
 
-## PASO 1: Crear Solicitud
+## 1. Diagrama general
 
-### Responsable
-**Solicitante** (rol `Requester`)
+```
+┌────────┐   submit    ┌────────────────────┐   approve   ┌──────────┐
+│ DRAFT  ├────────────▶│ PENDING_TECHNICAL  ├────────────▶│ APPROVED │──┐
+└───┬────┘             └────────┬───────────┘             └──────────┘  │
+    │ cancel                    │ reject                                 │
+    ▼                           ▼                                        │
+┌──────────┐              ┌──────────┐                                   │
+│CANCELLED │              │ REJECTED │◀─── resubmit ──── DRAFT           │
+└──────────┘              └──────────┘                                   │
+                                                                         │
+           ┌─────────────────────────────────────────────────────────────┘
+           ▼
+    Crear OC desde la SP  (POST /api/v1/purchase-orders/)
+           │
+           ▼
+    Aprobar OC (Finance 1 → Finance 2) → enviar → recibir
+           │
+           ▼
+    Recepción sobre la SP (POST /api/v1/requests/{id}/receive)
+           │
+           ▼
+   RECEIVED_PARTIAL  ─── o ──▶  COMPLETED  (commit de presupuesto)
+```
 
-### Entrada (Input)
+Estados de la SP: `DRAFT`, `PENDING_TECHNICAL`, `APPROVED`, `PURCHASING`, `RECEIVED_PARTIAL`, `RECEIVED_FULL`, `COMPLETED`, `REJECTED`, `CANCELLED`.
 
-| Campo | Tipo | Obligatorio | Descripción |
-|-------|------|:-----------:|-------------|
-| `title` | string | ✅ | Título descriptivo de la solicitud |
-| `description` | string | ❌ | Descripción detallada de la necesidad |
-| `cost_center_id` | UUID | ✅ | Centro de costo que financia la compra |
+---
+
+## 2. Roles y qué puede hacer cada uno
+
+| Rol | Crear SP | Enviar SP | Aprobar técnica | Comprar (crear OC) | Aprobar OC | Recepcionar |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `Requester` (Solicitante) | ✅ | ✅ (propias) | ❌ | ❌ | ❌ | ✅ (propias) |
+| `Technical Approver` | — | — | ✅ | ❌ | ❌ | — |
+| `Purchasing` | — | — | — | ✅ | ❌ | ✅ |
+| `Financial Approver` / `Finance 2` | — | — | — | — | ✅ | — |
+| `Admin` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+---
+
+## 3. Paso a paso
+
+### PASO 1 — Crear SP (Solicitante)
+
+**Endpoint:** `POST /api/v1/requests/`
+
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|:---:|---|
+| `title` | string | ✅ | Título breve |
+| `description` | string | ❌ | |
+| `cost_center_id` | UUID | ✅ | Centro de costo que financia |
 | `purchase_type` | enum | ❌ | `INSUMOS` (default), `ACTIVOS_FIJOS`, `OTROS_SERVICIOS` |
-| `items` | array | ✅ | Lista de ítems a comprar (mínimo 1) |
+| `items` | array | ✅ | Mínimo 1 ítem |
 
-**Cada ítem requiere:**
+Cada ítem requiere: `description`, `quantity`, `unit_price` (opcional `sku`, `catalog_item_id`).
 
-| Campo | Tipo | Obligatorio | Descripción |
-|-------|------|:-----------:|-------------|
-| `description` | string | ✅ | Descripción del producto/servicio |
-| `sku` | string | ❌ | Código SKU o referencia del producto |
-| `quantity` | decimal | ✅ | Cantidad solicitada |
-| `unit_price` | decimal | ✅ | Precio unitario estimado |
+El sistema calcula `total_price` por ítem (`quantity × unit_price`) y `total_amount` sumando los ítems. La SP queda en **DRAFT**.
 
-### Proceso
-1. El solicitante envía `POST /api/v1/requests/` con los datos
-2. El sistema calcula `total_price` por ítem (`quantity × unit_price`)
-3. El sistema calcula `total_amount` de la solicitud (suma de todos los ítems)
-4. Se crea la solicitud en estado **DRAFT**
+**Acciones disponibles en DRAFT:**
+- Adjuntar documentos: `POST /api/v1/requests/{id}/documents` (PDF/Word/Excel/imágenes, máx 10 MB)
+- Comentar: `POST /api/v1/requests/{id}/comments`
+- Eliminar (soft delete): `DELETE /api/v1/requests/{id}`
 
-### Salida (Output)
+---
+
+### PASO 2 — Enviar a aprobación (Solicitante)
+
+**Endpoint:** `POST /api/v1/requests/{id}/submit`
+
+**Precondiciones:**
+- La SP está en `DRAFT`.
+- El usuario es el creador (`requester_id`).
+
+**Qué ocurre:**
+1. Se **reserva presupuesto** (`reserved_amount += total_amount`). ⚠️ No se valida saldo — reservas por sobre el disponible son permitidas por diseño (visibilidad, no control).
+2. Se consulta la **Matriz de Aprobación** filtrando por empresa, CC y monto.
+3. Se crea log `SUBMITTED` (DRAFT → PENDING_TECHNICAL) con IP.
+4. Estado pasa a **`PENDING_TECHNICAL`**.
+
+> Si no hay reglas de aprobación cargadas para el CC, la SP cae a `PENDING_TECHNICAL` de todas formas (fail-safe).
+
+---
+
+### PASO 3 — Aprobación técnica (Technical Approver)
+
+**Aprobar:** `POST /api/v1/requests/{id}/approve`
+**Rechazar:** `POST /api/v1/requests/{id}/reject`
+
+**Body (ambos, opcional):**
 ```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "title": "Compra de insumos de oficina",
-  "description": "Resmas de papel y tóner para impresoras",
-  "requester_id": "uuid-del-solicitante",
-  "cost_center_id": "uuid-centro-costo",
-  "status": "DRAFT",
-  "total_amount": 2500.00,
-  "currency": "USD",
-  "current_step": 0,
-  "purchase_type": "INSUMOS",
-  "items": [
-    {
-      "id": "uuid",
-      "description": "Resma papel A4",
-      "sku": "PAP-001",
-      "quantity": 50,
-      "unit_price": 5.00,
-      "total_price": 250.00
-    },
-    {
-      "id": "uuid",
-      "description": "Tóner HP LaserJet",
-      "sku": "TON-HP-42A",
-      "quantity": 10,
-      "unit_price": 225.00,
-      "total_price": 2250.00
-    }
-  ],
-  "created_at": "2024-01-15T10:30:00Z"
-}
+{ "comment": "texto libre" }
 ```
 
-### Acciones adicionales en DRAFT
-- **Adjuntar documentos**: `POST /api/v1/requests/{id}/documents` (PDF, Word, Excel, imágenes; máx 10MB)
-- **Agregar comentarios**: `POST /api/v1/requests/{id}/comments`
-- **Eliminar solicitud**: `DELETE /api/v1/requests/{id}` (soft delete)
+> ⚠️ El campo es **`comment`** (singular). `comments` se ignora silenciosamente.
+
+**Aprobar:**
+- Valida que el usuario tenga rol `Technical Approver`.
+- Registra log `APPROVE` con IP y comentario.
+- Estado → **`APPROVED`**. (La SP termina su workflow de aprobación aquí — la validación financiera se hace en la OC).
+
+**Rechazar:**
+- Estado → `REJECTED`.
+- **Libera la reserva** (`reserved_amount -= total_amount`).
+- El Solicitante puede corregir y re-enviar (queda en `DRAFT` otra vez tras editar).
 
 ---
 
-## PASO 2: Enviar a Aprobación (Submit)
+### PASO 4 — Generar Orden de Compra (Purchasing)
 
-### Responsable
-**Solicitante** (el creador de la solicitud)
+**Endpoint:** `POST /api/v1/purchase-orders/` (con `request_id` de la SP aprobada).
 
-### Entrada
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| Ninguno | - | Solo se requiere el ID de la solicitud en la URL |
+> El endpoint legacy `POST /api/v1/requests/{id}/purchase` está **deprecado** y responde `410 Gone`. Usar siempre `/purchase-orders/`.
 
-### Prerrequisitos
-- La solicitud debe estar en estado **DRAFT**
-- Solo el creador original puede enviarla
+Una vez creada la OC, se pasa por el flujo **Finance 1 → Finance 2 → enviar al proveedor**. Ver el módulo de Órdenes de Compra para detalle.
 
-### Proceso
-1. El solicitante ejecuta `POST /api/v1/requests/{id}/submit`
-2. El sistema **reserva presupuesto** en el centro de costo (referencial)
-3. El sistema consulta la **Matriz de Aprobación** para determinar la cadena:
-   - Busca reglas que coincidan con: empresa + centro de costo + monto
-   - Ordena por `step_order` ascendente
-4. Se crea registro en **WorkflowLog** (acción: SUBMITTED)
-5. El estado cambia según la primera aprobación requerida
+---
 
-### Lógica de Determinación de Aprobadores
+### PASO 5 — Recepción (Solicitante o Compras)
 
-```
-SI monto >= $0 (siempre):
-   → Paso 1: Aprobador Técnico → estado PENDING_TECHNICAL
+**Endpoint:** `POST /api/v1/requests/{id}/receive`
 
-SI monto > $1,000:
-   → Paso 2: Aprobador Financiero → estado PENDING_FINANCIAL (después del paso 1)
-
-SI no hay reglas de aprobación configuradas:
-   → La solicitud pasa directamente a APPROVED
-```
-
-### Salida
+**Body:**
 ```json
-{
-  "id": "uuid",
-  "status": "PENDING_TECHNICAL",
-  "current_step": 1,
-  "total_amount": 2500.00,
-  "logs": [
-    {
-      "action": "SUBMITTED",
-      "from_status": "DRAFT",
-      "to_status": "PENDING_TECHNICAL",
-      "actor_name": "Solicitante",
-      "timestamp": "2024-01-15T10:35:00Z"
-    }
-  ]
-}
+{ "is_partial": false, "comment": "Todo recibido conforme" }
 ```
 
-### Efecto en Presupuesto
-| Campo | Antes | Después |
-|-------|-------|---------|
-| `reserved_amount` | $0.00 | +$2,500.00 |
-| `available_amount` | $10,000.00 | $7,500.00 |
+**Precondiciones:** estado en `APPROVED`, `PURCHASING` o `RECEIVED_PARTIAL`.
+
+- `is_partial: true`  → estado `RECEIVED_PARTIAL`, presupuesto intacto. Puedes volver a recepcionar.
+- `is_partial: false` → estado `COMPLETED`, **commit de presupuesto** (`reserved_amount -= total`, `executed_amount += total`).
 
 ---
 
-## PASO 3: Aprobación Técnica
+### PASO 6 — Cancelación (Solicitante)
 
-### Responsable
-**Aprobador Técnico** (rol `Technical Approver`)
-
-### Entrada
-| Campo | Tipo | Obligatorio | Descripción |
-|-------|------|:-----------:|-------------|
-| `comment` | string | ❌ | Observaciones técnicas |
-
-### Prerrequisitos
-- La solicitud debe estar en estado **PENDING_TECHNICAL**
-- El usuario debe tener rol `Technical Approver`
-
-### Proceso - Aprobar
-1. El aprobador revisa la solicitud, ítems y documentos adjuntos
-2. Ejecuta `POST /api/v1/requests/{id}/approve` con comentario opcional
-3. El sistema verifica el rol del usuario
-4. Se registra la aprobación en **WorkflowLog** con IP del aprobador
-5. Se incrementa `current_step`
-6. Se determina el siguiente estado:
-   - Si hay más pasos → **PENDING_FINANCIAL**
-   - Si no hay más pasos → **APPROVED**
-
-### Proceso - Rechazar
-1. El aprobador ejecuta `POST /api/v1/requests/{id}/reject`
-2. El sistema **libera la reserva de presupuesto**
-3. Estado cambia a **REJECTED**
-4. Se registra el rechazo con comentario en **WorkflowLog**
-
-### Salida (Aprobación)
-```json
-{
-  "id": "uuid",
-  "status": "PENDING_FINANCIAL",
-  "current_step": 2,
-  "logs": [
-    {
-      "action": "APPROVED",
-      "from_status": "PENDING_TECHNICAL",
-      "to_status": "PENDING_FINANCIAL",
-      "actor_name": "Aprobador Técnico",
-      "actor_role": "Technical Approver",
-      "comment": "Especificaciones técnicas correctas",
-      "ip_address": "192.168.1.100",
-      "timestamp": "2024-01-15T14:20:00Z"
-    }
-  ]
-}
-```
-
-### Salida (Rechazo)
-```json
-{
-  "status": "REJECTED",
-  "logs": [
-    {
-      "action": "REJECTED",
-      "from_status": "PENDING_TECHNICAL",
-      "to_status": "REJECTED",
-      "comment": "SKU incorrecto en ítem 2, verificar con proveedor"
-    }
-  ]
-}
-```
+**Endpoint:** `POST /api/v1/requests/{id}/cancel` — solo para `DRAFT`, `PENDING_TECHNICAL`.
+Libera reserva si corresponde. Estado → `CANCELLED`.
 
 ---
 
-## PASO 4: Aprobación Financiera
+## 4. Efecto en presupuesto — resumen
 
-### Responsable
-**Aprobador Financiero** (rol `Financial Approver`)
+| Evento | `reserved_amount` | `executed_amount` |
+|---|---|---|
+| Crear SP (DRAFT) | — | — |
+| Submit | **+ total** | — |
+| Reject / Cancel (desde PENDING) | − total | — |
+| Recepción total (COMPLETED) | − total | **+ total** |
+| Recepción parcial | — | — |
 
-> **Nota**: Este paso solo aplica si el monto total > $1,000
+`available_amount = total_amount − reserved_amount − executed_amount` (puede ser negativo; es esperado).
 
-### Entrada
-| Campo | Tipo | Obligatorio | Descripción |
-|-------|------|:-----------:|-------------|
-| `comment` | string | ❌ | Observaciones financieras |
+---
 
-### Prerrequisitos
-- La solicitud debe estar en estado **PENDING_FINANCIAL**
-- El usuario debe tener rol `Financial Approver`
+## 5. Consultas y seguimiento
 
-### Proceso - Aprobar
-1. El aprobador revisa monto, presupuesto disponible y justificación
-2. Ejecuta `POST /api/v1/requests/{id}/approve`
-3. Como es el último paso, el estado cambia a **APPROVED**
-4. Se registra en **WorkflowLog**
+| Qué | Endpoint |
+|---|---|
+| Detalle + audit trail | `GET /api/v1/requests/{id}` |
+| Timeline (estado, próximo aprobador, logs) | `GET /api/v1/requests/{id}/timeline` |
+| Listar con filtros + paginación | `GET /api/v1/requests/?status=&search=&min_amount=&...` |
+| Exportar (Excel/PDF) | `GET /api/v1/requests/export?format=excel` |
+| Documentos adjuntos | `GET /api/v1/requests/{id}/documents` |
+| Comentarios | `GET /api/v1/requests/{id}/comments` |
 
-### Proceso - Rechazar
-Idéntico al rechazo técnico: libera presupuesto, estado → REJECTED.
+Filtros de listado: `status`, `search` (ILIKE en título/desc), `cost_center_id`, `min_amount`, `max_amount`, `created_from`, `created_to`, `skip`, `limit`.
 
-### Salida (Aprobación)
-```json
-{
-  "status": "APPROVED",
-  "current_step": 2,
-  "logs": [
-    {
-      "action": "APPROVED",
-      "from_status": "PENDING_FINANCIAL",
-      "to_status": "APPROVED",
-      "actor_role": "Financial Approver",
-      "comment": "Presupuesto disponible, aprobado"
-    }
-  ]
-}
+Visibilidad por rol:
+- `Admin`, `Technical Approver`: ven todas.
+- `Financial Approver`, `Finance 2`, `Purchasing`: ven las propias + todas las post-aprobación.
+- `Requester` (otros): solo las propias.
+
+---
+
+## 6. Receta probada (cURL end-to-end)
+
+Todos los comandos usan `localhost:8000`. Usuarios seed: `admin|requester|tech|financial@example.com` / password `password`.
+
+```bash
+# 1) Login como solicitante
+TOK=$(curl -s -X POST http://localhost:8000/api/v1/login/access-token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=requester@example.com&password=password" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+# 2) Crear SP
+RID=$(curl -s -X POST http://localhost:8000/api/v1/requests/ \
+  -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+  -d '{"title":"Insumos oficina","cost_center_id":"<uuid-CC>",
+       "items":[{"description":"Resma A4","quantity":50,"unit_price":5}]}' \
+  | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
+
+# 3) Enviar a aprobación
+curl -s -X POST http://localhost:8000/api/v1/requests/$RID/submit \
+  -H "Authorization: Bearer $TOK"
+
+# 4) Login como Technical Approver y aprobar
+TECH=$(curl -s -X POST http://localhost:8000/api/v1/login/access-token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=tech@example.com&password=password" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+curl -s -X POST http://localhost:8000/api/v1/requests/$RID/approve \
+  -H "Authorization: Bearer $TECH" -H "Content-Type: application/json" \
+  -d '{"comment":"OK tecnico"}'
+
+# 5) (OC se gestiona en /api/v1/purchase-orders/ — ver doc de OC)
+
+# 6) Recepción total (commit de presupuesto)
+ITEM_ID=<uuid-del-item>  # tomar de la respuesta del paso 2
+curl -s -X POST http://localhost:8000/api/v1/requests/$RID/receive \
+  -H "Authorization: Bearer $TECH" -H "Content-Type: application/json" \
+  -d '{"is_partial":false,"comment":"Recibido conforme"}'
+
+# 7) Verificar timeline
+curl -s http://localhost:8000/api/v1/requests/$RID/timeline \
+  -H "Authorization: Bearer $TECH" | python -m json.tool
 ```
 
 ---
 
-## PASO 5: Gestión de Compra
+## 7. Resumen operativo
 
-### Responsable
-**Compras** (rol `purchasing`) o proceso manual
-
-### Proceso
-1. La solicitud aprobada queda visible para el equipo de compras
-2. Se gestiona la adquisición con proveedores externos
-3. El estado puede pasar a **PURCHASING** durante el proceso
-
-> Este paso es actualmente manual/externo al sistema. La trazabilidad se mantiene mediante comentarios y documentos adjuntos.
-
----
-
-## PASO 6: Recepción de Bienes
-
-### Responsable
-**Solicitante** o **Compras**
-
-### Entrada
-| Campo | Tipo | Obligatorio | Descripción |
-|-------|------|:-----------:|-------------|
-| `is_partial` | boolean | ✅ | `true` = recepción parcial, `false` = recepción total |
-| `comment` | string | ❌ | Observaciones de la recepción |
-
-### Prerrequisitos
-- Estado debe ser: APPROVED, PURCHASING o RECEIVED_PARTIAL
-
-### Proceso
-
-**Recepción Parcial** (`is_partial: true`):
-1. Ejecuta `POST /api/v1/requests/{id}/receive`
-2. Estado → **RECEIVED_PARTIAL**
-3. Se puede recepcionar nuevamente cuando llegue el resto
-
-**Recepción Total** (`is_partial: false`):
-1. Ejecuta `POST /api/v1/requests/{id}/receive`
-2. Estado → **COMPLETED**
-3. El sistema **compromete el presupuesto** (mueve de reservado a ejecutado)
-4. La solicitud queda cerrada
-
-### Salida (Recepción Total)
-```json
-{
-  "status": "COMPLETED",
-  "logs": [
-    {
-      "action": "RECEIVED_FULL",
-      "from_status": "APPROVED",
-      "to_status": "COMPLETED",
-      "comment": "Todos los ítems recibidos conforme"
-    }
-  ]
-}
-```
-
-### Efecto en Presupuesto (Recepción Total)
-| Campo | Antes | Después |
-|-------|-------|---------|
-| `reserved_amount` | $2,500.00 | -$2,500.00 |
-| `executed_amount` | $0.00 | +$2,500.00 |
-| `available_amount` | Sin cambio | Sin cambio |
+| # | Paso | Responsable | Endpoint | Estado resultante |
+|---|---|---|---|---|
+| 1 | Crear | Solicitante | `POST /requests/` | DRAFT |
+| 2 | Enviar | Solicitante | `POST /requests/{id}/submit` | PENDING_TECHNICAL (+reserva) |
+| 3 | Aprobar técnicamente | Technical Approver | `POST /requests/{id}/approve` | APPROVED |
+| 3b | Rechazar | Technical Approver | `POST /requests/{id}/reject` | REJECTED (−reserva) |
+| 4 | Crear OC | Purchasing | `POST /purchase-orders/` | (OC) |
+| 5 | Recepción total | Solicitante/Compras | `POST /requests/{id}/receive` | COMPLETED (+executed) |
+| 5b | Recepción parcial | Solicitante/Compras | `POST /requests/{id}/receive` con `is_partial:true` | RECEIVED_PARTIAL |
+| 6 | Cancelar | Solicitante | `POST /requests/{id}/cancel` | CANCELLED (−reserva) |
 
 ---
 
-## Flujos Alternativos
+## 8. Buenas prácticas
 
-### Cancelación
-
-| Campo | Valor |
-|-------|-------|
-| **Quién** | Solicitante (creador) |
-| **Cuándo** | Estado DRAFT o pendiente de aprobación |
-| **Endpoint** | `POST /api/v1/requests/{id}/cancel` |
-| **Efecto presupuesto** | Libera fondos reservados |
-| **Estado resultante** | CANCELLED |
-
-### Re-envío tras Rechazo
-
-| Campo | Valor |
-|-------|-------|
-| **Quién** | Solicitante (creador) |
-| **Cuándo** | Estado REJECTED |
-| **Proceso** | Corregir la solicitud y volver a enviar (submit) |
-| **Estado resultante** | DRAFT → PENDING_TECHNICAL (reinicia el flujo) |
-
----
-
-## Consultas y Seguimiento
-
-### Timeline de Solicitud
-```
-GET /api/v1/requests/{id}/timeline
-```
-
-**Salida:**
-```json
-{
-  "request_id": "uuid",
-  "title": "Compra de insumos de oficina",
-  "current_status": "PENDING_FINANCIAL",
-  "current_step": 2,
-  "total_steps": 2,
-  "next_approver_role": "Financial Approver",
-  "logs": [
-    {
-      "action": "SUBMITTED",
-      "from_status": "DRAFT",
-      "to_status": "PENDING_TECHNICAL",
-      "timestamp": "2024-01-15T10:35:00Z"
-    },
-    {
-      "action": "APPROVED",
-      "from_status": "PENDING_TECHNICAL",
-      "to_status": "PENDING_FINANCIAL",
-      "actor_name": "Aprobador Técnico",
-      "timestamp": "2024-01-15T14:20:00Z"
-    }
-  ]
-}
-```
-
-### Listado con Filtros
-```
-GET /api/v1/requests/?status=PENDING_TECHNICAL&skip=0&limit=20
-```
-
-**Filtros disponibles:**
-
-| Parámetro | Tipo | Descripción |
-|-----------|------|-------------|
-| `status` | enum | Filtrar por estado |
-| `search` | string | Buscar en título/descripción |
-| `cost_center_id` | UUID | Filtrar por centro de costo |
-| `min_amount` | decimal | Monto mínimo |
-| `max_amount` | decimal | Monto máximo |
-| `date_from` | date | Fecha desde |
-| `date_to` | date | Fecha hasta |
-| `skip` | int | Paginación: registros a saltar |
-| `limit` | int | Paginación: cantidad por página (default 20) |
-
-### Exportación
-```
-GET /api/v1/requests/export?format=excel
-GET /api/v1/requests/export?format=pdf
-```
-
----
-
-## Resumen del Proceso Completo
-
-| # | Paso | Responsable | Endpoint | Entrada Principal | Salida | Estado |
-|---|------|------------|----------|-------------------|--------|--------|
-| 1 | Crear | Solicitante | POST /requests/ | título, CC, ítems | Solicitud creada | DRAFT |
-| 2 | Enviar | Solicitante | POST /requests/{id}/submit | - | Reserva presupuesto | PENDING_TECHNICAL |
-| 3 | Aprobar Técnico | Aprobador Técnico | POST /requests/{id}/approve | comentario (opc) | Avanza paso | PENDING_FINANCIAL* |
-| 4 | Aprobar Financiero | Aprobador Financiero | POST /requests/{id}/approve | comentario (opc) | Solicitud aprobada | APPROVED |
-| 5 | Comprar | Compras | (manual) | - | En gestión | PURCHASING |
-| 6 | Recepcionar | Solicitante/Compras | POST /requests/{id}/receive | is_partial, comentario | Cierre | COMPLETED |
-
-*Solo si monto > $1,000. Si monto ≤ $1,000, paso 3 lleva directamente a APPROVED.
+- Adjunta cotizaciones o fichas técnicas **en DRAFT** antes de enviar — el aprobador las necesita.
+- Usa `comment` en aprobaciones/rechazos; queda en el audit log con IP y timestamp.
+- Consulta `GET /requests/{id}/timeline` para ver próximo aprobador y progreso.
+- Si la SP cae en estado incorrecto, revisa que exista una regla en `ApprovalMatrix` para el CC y monto — sin reglas, el sistema sigue enviando a `PENDING_TECHNICAL` como fail-safe.
+- El presupuesto en negativo es permitido y esperado: úsalo como señal para recomposiciones, no como bloqueo.

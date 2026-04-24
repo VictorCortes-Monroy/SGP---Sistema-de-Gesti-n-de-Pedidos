@@ -156,7 +156,8 @@ async def create_request(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """Create a new request in DRAFT status."""
-    total = sum(item.quantity * item.unit_price for item in request_in.items)
+    # unit_price is captured on the Purchase Order, not on the SP — treat missing as 0
+    total = sum(item.quantity * (item.unit_price or 0) for item in request_in.items)
 
     db_request = Request(
         title=request_in.title,
@@ -171,13 +172,15 @@ async def create_request(
     await db.flush()
 
     for item in request_in.items:
+        unit_price = item.unit_price or 0
         db_item = RequestItem(
             request_id=db_request.id,
+            catalog_item_id=item.catalog_item_id,
             description=item.description,
             sku=item.sku,
             quantity=item.quantity,
-            unit_price=item.unit_price,
-            total_price=item.quantity * item.unit_price,
+            unit_price=unit_price,
+            total_price=item.quantity * unit_price,
         )
         db.add(db_item)
 
@@ -502,7 +505,7 @@ async def get_request_timeline(
 # ─── PURCHASE (APPROVED → PURCHASING) ────────────────────────────────────────
 
 @router.post("/{request_id}/purchase", deprecated=True)
-async def start_purchasing_deprecated(*args, **kwargs) -> Any:
+async def start_purchasing_deprecated(request_id: str) -> Any:
     """Deprecated: usar POST /api/v1/purchase-orders/ para crear una OC e iniciar la compra."""
     raise HTTPException(
         status_code=410,

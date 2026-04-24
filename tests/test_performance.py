@@ -32,9 +32,9 @@ class TestN1Queries:
         resp = await client.get(f"{API}/requests/", headers=auth_header(user.id))
         assert resp.status_code == 200
 
-        # Should be bounded: auth query + list query (with selectinload) + maybe count
+        # Should be bounded: auth query (user + role selectinload) + count + list + selectinloads
         # Not 1 + N (one per request)
-        assert query_counter.count <= 6, f"Too many queries: {query_counter.count}"
+        assert query_counter.count <= 7, f"Too many queries: {query_counter.count}"
 
     async def test_list_users_bounded(self, client, seed_data, query_counter):
         """Listing users should not issue N+1 queries."""

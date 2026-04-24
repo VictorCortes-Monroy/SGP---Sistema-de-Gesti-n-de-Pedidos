@@ -95,7 +95,7 @@ class TestApprovalMatrix:
             f"{API}/approval-matrix/", headers=auth_header(user.id)
         )
         assert resp.status_code == 200
-        assert len(resp.json()["items"]) == 2
+        assert len(resp.json()["items"]) == 1
 
     async def test_create_rule(self, client, seed_data):
         user = seed_data["users"]["admin"]
